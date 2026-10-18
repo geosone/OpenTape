@@ -22,6 +22,7 @@ runs on Windows 3.1 and Windows 95/98/ME. It keeps the same task model,
 wording, ordering and keyboard shortcuts as DOS. Platform frontends call the
 same application services and never implement tape or archive logic.
 
-QUILIB remains part of Open386MAX for now. `OPEN386MAX` is the only DOS build
-location contract, allowing QUILIB to move into its own repository later
-without changing OpenTape's application UI.
+QUILIB remains part of the `deps/Open386MAX` submodule for now. `OPEN386MAX`
+is the only DOS build location contract, allowing that submodule to be replaced
+by a future standalone QUILIB repository without changing OpenTape's
+application UI.

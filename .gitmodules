@@ -1,0 +1,12 @@
+[submodule "deps/OpenASPI"]
+	path = deps/OpenASPI
+	url = https://github.com/geosone/OpenASPI.git
+[submodule "deps/Open386MAX"]
+	path = deps/Open386MAX
+	url = https://github.com/geosone/Open386MAX.git
+[submodule "deps/wxWindows"]
+	path = deps/wxWindows
+	url = https://github.com/geosone/wxWindows.git
+[submodule "deps/gdi"]
+	path = deps/gdi
+	url = https://github.com/geosone/gdi.git

@@ -9,10 +9,10 @@ of Greg Shenaut's historical `ASPITAPE.SYS`.  The same legacy backend is
 intended to work with OpenASPI's compatible `ASPITAP.SYS`.  Optional OpenASPI
 extensions and direct ASPI access are separate backends.
 
-This repository is at the bootstrap stage.  It currently provides a buildable
-16-bit DOS executable, the backend-selection contract, the shared OpenASPI
-ASPITAPE definitions, and host-side tests.  It does not read or write tapes
-yet.
+This repository is at the bootstrap stage. It currently provides buildable
+DOS and wxWindows Win16 start screens, the backend-selection contract, the
+shared OpenASPI ASPITAPE definitions, and host-side tests. It does not read or
+write tapes yet.
 
 The DOS interface directly uses Open386MAX's QUILIB.  No private window,
 dialog, keyboard, mouse, or colour implementation is kept in this repository.
@@ -22,7 +22,9 @@ Windows 3.1 as well as Windows 95/98/ME.
 
 ## Build
 
-The default sibling checkouts are `../386MAX`, `../OpenAspi`, and `../gdi`.
+Open386MAX, OpenASPI, GDI, and wxWindows are pinned Git submodules below
+`deps/`. Clone with `git clone --recursive`, or initialize an existing checkout
+with `git submodule update --init --recursive`.
 OpenWatcom is used for the DOS executable, Open386MAX supplies QUILIB and its
 DOS build rules, and the host C compiler runs unit tests:
 
@@ -30,12 +32,14 @@ DOS build rules, and the host C compiler runs unit tests:
 make
 make test
 make check
+make win16
 make dist
 ```
 
-The DOS build is written to `build/dos/OPENTAPE.EXE`. Override
-`OPEN386MAX`, `OPENASPI`, or `GDI` for another checkout layout. `make dist`
-creates a GDI-based installation directory below `build/dist`.
+The DOS build is written to `build/dos/OPENTAPE.EXE`; the Windows 3.1/9x/ME
+build is `build/win16/OTAPEWIN.EXE`. Override `OPEN386MAX`, `OPENASPI`, `GDI`,
+or `WXWINDOWS` for another checkout layout. `make dist` creates a GDI-based
+installation directory below `build/dist` containing both frontends.
 
 See [docs/ui-language.md](docs/ui-language.md) for the common DOS and Windows
 interaction language.

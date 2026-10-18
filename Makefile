@@ -1,25 +1,41 @@
-OPEN386MAX ?= ../386MAX
-OPENASPI   ?= ../OpenAspi
-GDI        ?= ../gdi
+OPEN386MAX ?= deps/Open386MAX
+OPENASPI   ?= deps/OpenASPI
+GDI        ?= deps/gdi
+WXWINDOWS  ?= deps/wxWindows
+WATCOM     ?= /opt/watcom
 CC         ?= cc
 
 BUILD   := build
 DOSBIN  := $(BUILD)/dos/OPENTAPE.EXE
+WINBIN  := $(BUILD)/win16/OTAPEWIN.EXE
 HOSTBIN := $(BUILD)/host/test_backend
 DISTDIR := $(BUILD)/dist
+
+WXBIN   := $(WATCOM)/binl64
+WXROOT  := $(abspath $(WXWINDOWS))
+WXCXX   := $(WXBIN)/wpp
+WXCC    := $(WXBIN)/wcc
+WXRC    := $(WXBIN)/wrc
+WXLINK  := $(WXBIN)/wlink
+WXLIB   := $(WXWINDOWS)/build/lib/wx.lib
+WXFLAGS := -zq -fr -zw -ml -zt256 -bt=windows -dwx_msw -w1 -d1 \
+	-i=$(WXROOT)/include/msw -i=$(WXROOT)/include/base \
+	-i=$(WXROOT)/contrib/fafa -i=$(WATCOM)/h -i=$(WATCOM)/h/win
 
 CFLAGS  ?= -std=c90 -Wall -Wextra -Werror -pedantic -O2
 CPPFLAGS += -Iinclude
 CPPFLAGS += -I$(OPENASPI)/include
 
-.PHONY: all test check dist clean
+.PHONY: all win16 test check dist clean
 
 all: $(DOSBIN) $(HOSTBIN)
 
 test: $(HOSTBIN)
 	$(HOSTBIN)
 
-check: all test
+check: all test win16
+
+win16: $(WINBIN)
 
 $(DOSBIN): src/main.c core/backend.c include/opentape/backend.h dos.mk
 	$(MAKE) -f dos.mk OPEN386MAX=$(abspath $(OPEN386MAX)) \
@@ -32,10 +48,41 @@ $(HOSTBIN): tests/test_backend.c core/backend.c include/opentape/backend.h \
 	mkdir -p $(@D)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ tests/test_backend.c core/backend.c
 
-dist: all $(GDI)/build/INSTALL.EXE LICENSE
+$(BUILD)/win16/opentape.obj: frontends/win16/opentape.cpp \
+		include/opentape/backend.h $(WXLIB)
+	mkdir -p $(@D)
+	cd frontends/win16 && $(abspath $(WXCXX)) $(WXFLAGS) \
+		-i=$(abspath include) -fo=$(abspath $@) opentape.cpp
+
+$(BUILD)/win16/backend.obj: core/backend.c include/opentape/backend.h
+	mkdir -p $(@D)
+	$(WXCC) $(WXFLAGS) -i=$(abspath include) -fo=$@ $<
+
+$(BUILD)/win16/opentape.res: frontends/win16/opentape.rc $(WXLIB)
+	mkdir -p $(@D)
+	cd frontends/win16 && $(abspath $(WXRC)) -q -r -bt=windows \
+		-i=$(abspath $(WXWINDOWS)/include/msw) \
+		-i=$(abspath $(WXWINDOWS)/contrib/fafa) -i=$(WATCOM)/h/win \
+		-fo=$(abspath $@) opentape.rc
+
+$(WINBIN): $(BUILD)/win16/opentape.obj $(BUILD)/win16/backend.obj \
+		$(BUILD)/win16/opentape.res $(WXLIB)
+	cd $(@D) && $(abspath $(WXLINK)) option quiet format windows \
+		name $(notdir $@) libpath $(WATCOM)/lib286/win \
+		libpath $(WATCOM)/lib286 library windows \
+		file opentape.obj file backend.obj library $(abspath $(WXLIB)) \
+		library commdlg library mmsystem library shell library ddeml \
+		library ctl3dv2 library $(WATCOM)/lib286/win/plibl.lib \
+		option stack=16k option heapsize=16k option version=3.10 \
+		option resource=opentape.res option map=OTAPEWIN.map
+
+$(WXLIB):
+	$(MAKE) -C $(WXWINDOWS) lib
+
+dist: all win16 $(GDI)/build/INSTALL.EXE LICENSE
 	rm -rf $(DISTDIR)
 	mkdir -p $(DISTDIR)
-	cp $(DOSBIN) $(GDI)/build/INSTALL.EXE installer/INSTALL.INI \
+	cp $(DOSBIN) $(WINBIN) $(GDI)/build/INSTALL.EXE installer/INSTALL.INI \
 		installer/README.TXT LICENSE $(DISTDIR)/
 	mv $(DISTDIR)/LICENSE $(DISTDIR)/LICENSE.TXT
 
