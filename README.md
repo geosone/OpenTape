@@ -34,12 +34,13 @@ make test
 make check
 make win16
 make dist
+make languages
 ```
 
-The DOS build is written to `build/dos/OPENTAPE.EXE`; the Windows 3.1/9x/ME
-build is `build/win16/OTAPEWIN.EXE`. Override `OPEN386MAX`, `OPENASPI`, `GDI`,
-or `WXWINDOWS` for another checkout layout. `make dist` creates a GDI-based
-installation directory below `build/dist` containing both frontends.
+Like Open386MAX, OpenTape uses `MAXLANG=US` for English (the default) and
+`MAXLANG=GR` for German. Builds are kept apart below `build/US` and `build/GR`;
+`make languages` builds both localized GDI distributions. Override
+`OPEN386MAX`, `OPENASPI`, `GDI`, or `WXWINDOWS` for another checkout layout.
 
 See [docs/ui-language.md](docs/ui-language.md) for the common DOS and Windows
 interaction language.

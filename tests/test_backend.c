@@ -1,5 +1,6 @@
 #include <assert.h>
 #include <stdio.h>
+#include <string.h>
 
 #include "openaspi/aspitape.h"
 #include "opentape/backend.h"
@@ -23,6 +24,15 @@ int main(void)
            OT_BACKEND_DIRECT_ASPI);
     assert(ot_backend_select(0u, OT_BACKEND_AUTO) == OT_BACKEND_NONE);
     assert(ot_backend_name(OT_BACKEND_LEGACY_TAPE) != 0);
+#ifdef LANG_GR
+    assert(strcmp(ot_backend_name(OT_BACKEND_NONE), "keines") == 0);
+    assert(strcmp(ot_backend_name(OT_BACKEND_DIRECT_ASPI),
+                  "direktes ASPI") == 0);
+#else
+    assert(strcmp(ot_backend_name(OT_BACKEND_NONE), "none") == 0);
+    assert(strcmp(ot_backend_name(OT_BACKEND_DIRECT_ASPI),
+                  "direct ASPI") == 0);
+#endif
 
     puts("OpenTape backend tests passed");
     return 0;

@@ -4,12 +4,20 @@ GDI        ?= deps/gdi
 WXWINDOWS  ?= deps/wxWindows
 WATCOM     ?= /opt/watcom
 CC         ?= cc
+MAXLANG    ?= US
 
-BUILD   := build
+SUPPORTED_LANGS := US GR
+ifeq ($(filter $(MAXLANG),$(SUPPORTED_LANGS)),)
+$(error Unsupported MAXLANG '$(MAXLANG)'; use US or GR)
+endif
+
+BUILD   ?= build/$(MAXLANG)
 DOSBIN  := $(BUILD)/dos/OPENTAPE.EXE
 WINBIN  := $(BUILD)/win16/OTAPEWIN.EXE
 HOSTBIN := $(BUILD)/host/test_backend
 DISTDIR := $(BUILD)/dist
+INSTALL_CFG := installer/INSTALL.$(MAXLANG)
+INSTALL_README := installer/README.$(MAXLANG)
 
 WXBIN   := $(WATCOM)/binl64
 WXROOT  := $(abspath $(WXWINDOWS))
@@ -19,14 +27,16 @@ WXRC    := $(WXBIN)/wrc
 WXLINK  := $(WXBIN)/wlink
 WXLIB   := $(WXWINDOWS)/build/lib/wx.lib
 WXFLAGS := -zq -fr -zw -ml -zt256 -bt=windows -dwx_msw -w1 -d1 \
+	-dLANG_$(MAXLANG) \
 	-i=$(WXROOT)/include/msw -i=$(WXROOT)/include/base \
 	-i=$(WXROOT)/contrib/fafa -i=$(WATCOM)/h -i=$(WATCOM)/h/win
 
 CFLAGS  ?= -std=c90 -Wall -Wextra -Werror -pedantic -O2
 CPPFLAGS += -Iinclude
 CPPFLAGS += -I$(OPENASPI)/include
+CPPFLAGS += -DLANG_$(MAXLANG)
 
-.PHONY: all win16 test check dist clean
+.PHONY: all win16 test check languages dist clean
 
 all: $(DOSBIN) $(HOSTBIN)
 
@@ -37,24 +47,31 @@ check: all test win16
 
 win16: $(WINBIN)
 
-$(DOSBIN): src/main.c core/backend.c include/opentape/backend.h dos.mk
+languages:
+	$(MAKE) MAXLANG=US BUILD=build/US dist
+	$(MAKE) MAXLANG=GR BUILD=build/GR dist
+
+$(DOSBIN): src/main.c core/backend.c include/opentape/backend.h \
+		include/opentape/messages.h dos.mk
 	$(MAKE) -f dos.mk OPEN386MAX=$(abspath $(OPEN386MAX)) \
 		OPENASPI=$(abspath $(OPENASPI)) \
+		MAXLANG=$(MAXLANG) \
 		OUT=$(abspath $(BUILD)/dos-obj) BINDIR=$(abspath $(BUILD)/dos) \
 		$(abspath $@)
 
 $(HOSTBIN): tests/test_backend.c core/backend.c include/opentape/backend.h \
-		$(OPENASPI)/include/openaspi/aspitape.h
+		include/opentape/messages.h $(OPENASPI)/include/openaspi/aspitape.h
 	mkdir -p $(@D)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ tests/test_backend.c core/backend.c
 
 $(BUILD)/win16/opentape.obj: frontends/win16/opentape.cpp \
-		include/opentape/backend.h $(WXLIB)
+		include/opentape/backend.h include/opentape/messages.h $(WXLIB)
 	mkdir -p $(@D)
 	cd frontends/win16 && $(abspath $(WXCXX)) $(WXFLAGS) \
 		-i=$(abspath include) -fo=$(abspath $@) opentape.cpp
 
-$(BUILD)/win16/backend.obj: core/backend.c include/opentape/backend.h
+$(BUILD)/win16/backend.obj: core/backend.c include/opentape/backend.h \
+		include/opentape/messages.h
 	mkdir -p $(@D)
 	$(WXCC) $(WXFLAGS) -i=$(abspath include) -fo=$@ $<
 
@@ -79,11 +96,13 @@ $(WINBIN): $(BUILD)/win16/opentape.obj $(BUILD)/win16/backend.obj \
 $(WXLIB):
 	$(MAKE) -C $(WXWINDOWS) lib
 
-dist: all win16 $(GDI)/build/INSTALL.EXE LICENSE
+dist: all win16 $(GDI)/build/INSTALL.EXE $(INSTALL_CFG) \
+		$(INSTALL_README) LICENSE
 	rm -rf $(DISTDIR)
 	mkdir -p $(DISTDIR)
-	cp $(DOSBIN) $(WINBIN) $(GDI)/build/INSTALL.EXE installer/INSTALL.INI \
-		installer/README.TXT LICENSE $(DISTDIR)/
+	cp $(DOSBIN) $(WINBIN) $(GDI)/build/INSTALL.EXE LICENSE $(DISTDIR)/
+	cp $(INSTALL_CFG) $(DISTDIR)/INSTALL.INI
+	cp $(INSTALL_README) $(DISTDIR)/README.TXT
 	mv $(DISTDIR)/LICENSE $(DISTDIR)/LICENSE.TXT
 
 $(GDI)/build/INSTALL.EXE:

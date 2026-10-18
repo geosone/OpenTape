@@ -9,6 +9,7 @@
 extern "C" {
 #include "opentape/backend.h"
 }
+#include "opentape/messages.h"
 
 class OpenTapeApp: public wxApp
 {
@@ -34,7 +35,7 @@ wxFrame *OpenTapeApp::OnInit(void)
 {
     OpenTapeFrame *frame;
 
-    frame = new OpenTapeFrame(NULL, "OpenTape");
+    frame = new OpenTapeFrame(NULL, OT_MSG_APP_TITLE);
     frame->Show(TRUE);
     return frame;
 }
@@ -50,34 +51,30 @@ OpenTapeFrame::OpenTapeFrame(wxFrame *parent, char *title):
     wxPanel *panel;
 
     fileMenu = new wxMenu;
-    fileMenu->Append(OT_MENU_EXIT, "E&xit");
+    fileMenu->Append(OT_MENU_EXIT, OT_MSG_MENU_EXIT);
     helpMenu = new wxMenu;
-    helpMenu->Append(OT_MENU_ABOUT, "&About OpenTape...");
+    helpMenu->Append(OT_MENU_ABOUT, OT_MSG_MENU_ABOUT);
     menuBar = new wxMenuBar;
-    menuBar->Append(fileMenu, "&File");
-    menuBar->Append(helpMenu, "&Help");
+    menuBar->Append(fileMenu, OT_MSG_MENU_FILE);
+    menuBar->Append(helpMenu, OT_MSG_MENU_HELP);
     SetMenuBar(menuBar);
 
     panel = new wxPanel(this, 0, 0, 520, 330);
-    new wxMessage(panel, "OpenTape", 18, 18);
-    new wxMessage(panel,
-                  "Backup, restore, verify and catalogue for SCSI tape",
-                  18, 48);
+    new wxMessage(panel, OT_MSG_APP_TITLE, 18, 18);
+    new wxMessage(panel, OT_MSG_TASK_SUMMARY_LONG, 18, 48);
 
-    new wxButton(panel, NULL, "Backup...", 18, 88, 105, 30);
-    new wxButton(panel, NULL, "Restore...", 132, 88, 105, 30);
-    new wxButton(panel, NULL, "Verify...", 246, 88, 105, 30);
-    new wxButton(panel, NULL, "Catalogue...", 360, 88, 120, 30);
+    new wxButton(panel, NULL, OT_MSG_TASK_BACKUP, 18, 88, 140, 30);
+    new wxButton(panel, NULL, OT_MSG_TASK_RESTORE, 176, 88, 140, 30);
+    new wxButton(panel, NULL, OT_MSG_TASK_VERIFY, 334, 88, 140, 30);
 
-    new wxButton(panel, NULL, "Media...", 18, 132, 105, 30);
-    new wxButton(panel, NULL, "Settings...", 132, 132, 105, 30);
+    new wxButton(panel, NULL, OT_MSG_TASK_CATALOGUE, 18, 132, 140, 30);
+    new wxButton(panel, NULL, OT_MSG_TASK_MEDIA, 176, 132, 140, 30);
+    new wxButton(panel, NULL, OT_MSG_TASK_SETTINGS, 334, 132, 140, 30);
 
     backend = ot_backend_select(0u, OT_BACKEND_AUTO);
-    sprintf(status, "Detected backend: %s", ot_backend_name(backend));
+    sprintf(status, OT_MSG_BACKEND_FMT, ot_backend_name(backend));
     new wxMessage(panel, status, 18, 195);
-    new wxMessage(panel,
-                  "Bootstrap build: tape access is not implemented yet.",
-                  18, 225);
+    new wxMessage(panel, OT_MSG_NOT_IMPLEMENTED, 18, 225);
 }
 
 void OpenTapeFrame::OnMenuCommand(int id)
@@ -87,8 +84,8 @@ void OpenTapeFrame::OnMenuCommand(int id)
         delete this;
         break;
     case OT_MENU_ABOUT:
-        wxMessageBox("OpenTape 0.1 bootstrap\nGPL version 3",
-                     "About OpenTape", wxOK | wxCENTRE, this);
+        wxMessageBox(OT_MSG_ABOUT_TEXT, OT_MSG_ABOUT_TITLE,
+                     wxOK | wxCENTRE, this);
         break;
     }
 }

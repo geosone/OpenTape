@@ -1,0 +1,31 @@
+; Deutsches OpenTape-Paket fuer GeosOne DOS Installer (GDI), GPL Version 3.
+[Setup]
+Title=OpenTape-Installation
+Product=GeosOne OpenTape 0.1
+License=LICENSE.TXT
+Readme=README.TXT
+DefaultDir=%BOOT%\OPENTAPE
+Done=OpenTape wurde installiert. Laden Sie zuvor einen ASPITAPE-kompatiblen Treiber.
+
+[Welcome]
+OpenTape dient zum Sichern, Wiederherstellen, Pruefen und Katalogisieren von
+SCSI-Bandlaufwerken. Es arbeitet mit OpenASPI ASPITAP.SYS und kompatiblen
+historischen ASPITAPE.SYS-Treibern.
+
+Dieses Programm kopiert OpenTape auf die Festplatte. Es installiert keinen
+Bandtreiber; verwenden Sie dafuer die OpenASPI-Installation.
+
+[Options]
+Option=on|OpenTape-Verzeichnis zu PATH hinzufuegen
+Option=on|Windows-3.1/95/98/ME-Oberflaeche installieren
+
+[Files]
+OPENTAPE.EXE
+2|OTAPEWIN.EXE
+README.TXT
+LICENSE.TXT
+
+[Autoexec.bat]
+Remove=SET PATH=%PATH%;%DIR%
+Add=1|SET PATH=%PATH%;%DIR%
+Position=bottom

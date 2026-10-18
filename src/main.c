@@ -10,12 +10,13 @@
 #include <windowfn.h>
 
 #include "opentape/backend.h"
+#include "opentape/messages.h"
 
 static void usage(void)
 {
-    puts("OpenTape 0.1 bootstrap");
-    puts("Usage: OPENTAPE [--help]");
-    puts("Tape access is not implemented in this bootstrap build.");
+    puts(OT_MSG_VERSION);
+    puts(OT_MSG_USAGE);
+    puts(OT_MSG_NOT_IMPLEMENTED);
 }
 
 static void put_line(WINDESC *panel, int row, char *text, char color)
@@ -57,14 +58,14 @@ static void show_ui(enum ot_backend_kind selected)
     hide_cursor();
     paintBackgroundScreen();
 
-    put_line(&DataWin, 1, "OpenTape", DataYellowColor);
-    put_line(&DataWin, 3, "Backup, restore, verify and catalogue", DataColor);
-    put_line(&DataWin, 5, "Tape access is not implemented yet.", DataColor);
-    sprintf(backend, "Detected backend: %s", ot_backend_name(selected));
+    put_line(&DataWin, 1, OT_MSG_APP_TITLE, DataYellowColor);
+    put_line(&DataWin, 3, OT_MSG_TASK_SUMMARY, DataColor);
+    put_line(&DataWin, 5, OT_MSG_NOT_IMPLEMENTED, DataColor);
+    sprintf(backend, OT_MSG_BACKEND_FMT, ot_backend_name(selected));
     put_line(&DataWin, 7, backend, DataColor);
 
-    put_line(&QuickWin, 1, "OpenTape help", QuickBackColor);
-    put_line(&QuickWin, 3, "Esc returns to DOS.", QuickBackColor);
+    put_line(&QuickWin, 1, OT_MSG_HELP_TITLE, QuickBackColor);
+    put_line(&QuickWin, 3, OT_MSG_ESCAPE_DOS, QuickBackColor);
 
     pressAnyKey(INPUT_WAIT);
     end_input();
@@ -77,7 +78,8 @@ int main(int argc, char **argv)
 
     if (argc > 1 && strcmp(argv[1], "--help") != 0 &&
         strcmp(argv[1], "/?") != 0) {
-        fputs("OpenTape: unknown option\n", stderr);
+        fputs(OT_MSG_UNKNOWN_OPTION, stderr);
+        fputc('\n', stderr);
         usage();
         return 1;
     }
@@ -85,7 +87,7 @@ int main(int argc, char **argv)
     selected = ot_backend_select(0u, OT_BACKEND_AUTO);
     if (argc > 1) {
         usage();
-        printf("Detected backend: %s\n", ot_backend_name(selected));
+        printf(OT_MSG_BACKEND_FMT "\n", ot_backend_name(selected));
     } else {
         show_ui(selected);
     }

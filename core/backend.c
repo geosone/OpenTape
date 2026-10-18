@@ -1,4 +1,5 @@
 #include "opentape/backend.h"
+#include "opentape/messages.h"
 
 static int ot_backend_available(unsigned available,
                                 enum ot_backend_kind kind)
@@ -39,14 +40,14 @@ const char *ot_backend_name(enum ot_backend_kind kind)
 {
     switch (kind) {
     case OT_BACKEND_AUTO:
-        return "automatic";
+        return OT_MSG_BACKEND_AUTO;
     case OT_BACKEND_LEGACY_TAPE:
-        return "ASPITAPE-compatible";
+        return OT_MSG_BACKEND_LEGACY;
     case OT_BACKEND_OPENASPI:
-        return "OpenASPI";
+        return OT_MSG_BACKEND_OPENASPI;
     case OT_BACKEND_DIRECT_ASPI:
-        return "direct ASPI";
+        return OT_MSG_BACKEND_DIRECT;
     default:
-        return "none";
+        return OT_MSG_BACKEND_NONE;
     }
 }

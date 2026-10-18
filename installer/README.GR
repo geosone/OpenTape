@@ -1,0 +1,18 @@
+OpenTape 0.1 - Bandsicherung fuer DOS
+=====================================
+
+OpenTape dient zum Sichern, Wiederherstellen, Pruefen und Katalogisieren von
+SCSI-Bandlaufwerken. Es ist fuer OpenASPI ASPITAP.SYS und die dokumentierte
+Schnittstelle des historischen ASPITAPE.SYS-Treibers vorgesehen.
+
+OPENTAPE.EXE ist die DOS-QUILIB-Oberflaeche. OTAPEWIN.EXE ist die gemeinsame
+wxWindows-Win16-Oberflaeche fuer Windows 3.1 und Windows 95/98/ME.
+
+Starten Sie INSTALL.EXE zur Installation oder Aktualisierung. INSTALL /U im
+Installationsverzeichnis entfernt OpenTape. Das Installationsprogramm ist der
+GeosOne DOS Installer: https://github.com/geosone/gdi
+
+Dies ist eine fruehe Startversion und liest oder schreibt noch keine Baender.
+
+Lizenz: GNU General Public License Version 3.
+Quellen: https://github.com/geosone/OpenTape
