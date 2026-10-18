@@ -24,16 +24,14 @@ application UI.
 Package installation is described by GDI `INSTALL.INI`, not implemented in
 OpenTape.
 
-The format layer has two interoperable backends:
+The initial format layer writes OpenTape's native sequential volume format. A
+volume contains a label, checksummed blocks, typed records and explicit session
+boundaries on one ordinary tape partition. The external catalogue accelerates
+selection and positioning, but a scanner can reconstruct it from the volume.
+This path works through the legacy `RMTx`/`NRMTx` interface and therefore covers
+DDS/DAT as well as newer drives.
 
-- standard LTFS for supported drives and cartridges with the required two-
-  partition tape capability;
-- standard streaming TAR for DDS/DAT and other sequential devices without
-  LTFS-compatible partitioning.
-
-LTFS needs partition selection, logical positioning, index XML and media-format
-operations that are not present in the historical ASPITAPE API. It therefore
-requires a detected OpenASPI extension or the direct-ASPI backend. TAR remains
-available through the legacy `RMTx`/`NRMTx` interface. Frontends select `auto`,
-`ltfs` or `tar`; `auto` recognizes existing media and never reformats it.
-Restore must remain possible without the catalogue database.
+LTFS remains a later optional backend for drives and cartridges with the
+required two-partition capability. It needs operations not present in the
+historical ASPITAPE API and therefore requires detected OpenASPI extensions or
+direct ASPI. TAR is reserved for a later import/export compatibility path.

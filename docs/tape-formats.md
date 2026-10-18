@@ -1,7 +1,11 @@
 # Tape formats
 
-OpenTape has two standard on-tape formats. Device capability, not cartridge
-length, decides whether LTFS is possible.
+OpenTape begins with its own documented, self-describing sequential volume
+format. This follows the recovery model used by Bacula/Bareos: a database is a
+fast catalogue, not the only copy of the tape contents. The format uses one
+ordinary tape partition and therefore covers DDS/DAT and other legacy media.
+
+See [native-volume-format.md](native-volume-format.md) for the byte layout.
 
 ## LTFS
 
@@ -24,25 +28,19 @@ References:
 - [LTFS reference implementation](https://github.com/LinearTapeFileSystem/ltfs)
 - [SNIA LTFS format specification](https://www.snia.org/tech_activities/standards/curr_standards/ltfs)
 
-## Streaming TAR
+## TAR interoperability
 
-DDS/DAT and other drives without LTFS-compatible partitioning use a standard
-streaming TAR layout. This preserves interchange with existing tape tools and
-works through the historical `RMTx`/`NRMTx` character-device interface.
-
-OpenTape-specific catalogue data stays off tape where possible. Any DOS
-metadata that cannot be represented portably must use documented TAR extension
-records that older readers can skip. A restore must never depend on the local
-catalogue database.
+TAR is a future import/export compatibility path, not OpenTape's native backup
+format. It can be added without changing the native media version.
 
 ## Automatic selection
 
-`auto` follows these rules:
+Future `auto` selection follows these rules:
 
 1. Inspect the existing medium without writing.
-2. If a valid LTFS label is present and the drive supports its operations, use
+2. Use the native codec for an `OPENTAPE` volume label.
+3. If a valid LTFS label is present and the drive supports its operations, use
    LTFS.
-3. If a TAR stream is present, use TAR.
-4. Treat blank or unknown media as unformatted and ask the user to select a
-   supported format.
-5. Never silently format, partition or overwrite a tape.
+4. Offer an explicit importer for recognized TAR media.
+5. Treat blank or unknown media as unformatted.
+6. Never silently format, partition or overwrite a tape.

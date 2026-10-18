@@ -15,6 +15,7 @@ BUILD   ?= build/$(MAXLANG)
 DOSBIN  := $(BUILD)/dos/OPENTAPE.EXE
 WINBIN  := $(BUILD)/win16/OTAPEWIN.EXE
 HOSTBIN := $(BUILD)/host/test_backend
+HOSTFORMATBIN := $(BUILD)/host/test_volume_format
 DISTDIR := $(BUILD)/dist
 INSTALL_CFG := installer/INSTALL.$(MAXLANG)
 INSTALL_README := installer/README.$(MAXLANG)
@@ -38,10 +39,11 @@ CPPFLAGS += -DLANG_$(MAXLANG)
 
 .PHONY: all win16 test check languages dist clean
 
-all: $(DOSBIN) $(HOSTBIN)
+all: $(DOSBIN) $(HOSTBIN) $(HOSTFORMATBIN)
 
-test: $(HOSTBIN)
+test: $(HOSTBIN) $(HOSTFORMATBIN)
 	$(HOSTBIN)
+	$(HOSTFORMATBIN)
 
 check: all test win16
 
@@ -63,6 +65,12 @@ $(HOSTBIN): tests/test_backend.c core/backend.c include/opentape/backend.h \
 		include/opentape/messages.h $(OPENASPI)/include/openaspi/aspitape.h
 	mkdir -p $(@D)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ tests/test_backend.c core/backend.c
+
+$(HOSTFORMATBIN): tests/test_volume_format.c core/volume_format.c \
+		include/opentape/volume_format.h $(OPENASPI)/include/openaspi/types.h
+	mkdir -p $(@D)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ tests/test_volume_format.c \
+		core/volume_format.c
 
 $(BUILD)/win16/opentape.obj: frontends/win16/opentape.cpp \
 		include/opentape/backend.h include/opentape/messages.h $(WXLIB)

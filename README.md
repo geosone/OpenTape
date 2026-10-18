@@ -9,11 +9,12 @@ of Greg Shenaut's historical `ASPITAPE.SYS`.  The same legacy backend is
 intended to work with OpenASPI's compatible `ASPITAP.SYS`.  Optional OpenASPI
 extensions and direct ASPI access are separate backends.
 
-OpenTape writes standard LTFS on supported partition-capable tape generations.
-DDS/DAT and other drives without LTFS-compatible partition support use
-standard streaming TAR instead;
-OpenTape will not create a private pseudo-LTFS variant that other software
-cannot read. See [docs/tape-formats.md](docs/tape-formats.md).
+OpenTape's primary backup format is a self-describing sequential volume format
+in the style of Bacula/Bareos. It works on one ordinary tape partition,
+including DDS/DAT, and permits rebuilding a lost external catalogue by scanning
+the media. LTFS remains a later optional backend for supported drives. See
+[docs/tape-formats.md](docs/tape-formats.md) and
+[docs/native-volume-format.md](docs/native-volume-format.md).
 
 This repository is at the bootstrap stage. It currently provides buildable
 DOS and wxWindows Win16 start screens, the backend-selection contract, the
@@ -63,12 +64,15 @@ added.
 
 ## Tape-format policy
 
-- Detect an existing LTFS or TAR volume without changing it.
-- Offer LTFS only when the drive and cartridge expose the required partition
-  capabilities through OpenASPI extensions or direct ASPI.
-- Use streaming TAR for DDS/DAT and other non-partitioning drives.
+- Use the native self-describing format from the first backup implementation.
+- Keep a fast external catalogue, but make every volume independently
+  scannable so catalogue loss never makes the tape unreadable.
+- Use one sequential partition, portable block/record serialization, checksums
+  and explicit session/file/volume records.
+- Add LTFS later as an optional format on compatible drives.
+- Treat TAR as a future import/export compatibility path, not the native format.
 - Require an explicit destructive confirmation before formatting any tape.
-- Never require OpenTape's catalogue database to restore standard media.
+- Never require OpenTape's catalogue database to recover native media.
 
 ## License
 

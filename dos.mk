@@ -11,11 +11,12 @@ CMODEL     := l
 CDEFS      := DOS_VERSION
 PROGS      := OPENTAPE.EXE
 
-OPENTAPE.EXE_OBJS  := MAIN.OBJ BACKEND.OBJ
+OPENTAPE.EXE_OBJS  := MAIN.OBJ BACKEND.OBJ VOLUME.OBJ
 OPENTAPE.EXE_LIBS  := $(ROOT)/build/QUILIB/LQUILIBR.LIB
 OPENTAPE.EXE_STACK := 9000
 MAIN.OBJ_SRC       := main.c
 BACKEND.OBJ_SRC    := backend.c
+VOLUME.OBJ_SRC     := volume_format.c
 
 $(ROOT)/linux/bin/jwasm $(ROOT)/linux/bin/jwlink:
 	$(MAKE) -C $(ROOT) -f GNUmakefile tools
