@@ -24,6 +24,16 @@ application UI.
 Package installation is described by GDI `INSTALL.INI`, not implemented in
 OpenTape.
 
-The initial archive format target is streaming TAR with an OpenTape metadata
-extension only where standard TAR cannot represent required DOS information.
+The format layer has two interoperable backends:
+
+- standard LTFS for supported drives and cartridges with the required two-
+  partition tape capability;
+- standard streaming TAR for DDS/DAT and other sequential devices without
+  LTFS-compatible partitioning.
+
+LTFS needs partition selection, logical positioning, index XML and media-format
+operations that are not present in the historical ASPITAPE API. It therefore
+requires a detected OpenASPI extension or the direct-ASPI backend. TAR remains
+available through the legacy `RMTx`/`NRMTx` interface. Frontends select `auto`,
+`ltfs` or `tar`; `auto` recognizes existing media and never reformats it.
 Restore must remain possible without the catalogue database.
