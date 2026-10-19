@@ -13,3 +13,10 @@ installation with `-2` returns the sixteen-byte layout from the original
 This is a backend integration contract, not a completed DOS I/O backend.
 An eventual historical-driver fallback must select the correct ABI explicitly;
 it cannot infer a third-party driver's layout from the shared function number.
+
+When `OA_MT16_STATE_WRITE_ERROR` (`0200h`) is set, diagnostic fields describe
+a saved failed/short buffered write, not the most recent readiness command.
+Display and retain that failure even if `MTNOP` succeeds. The snapshot survives
+close and reopen; only a full, successful physical data write in a new session
+clears it. Buffered acceptance and zero-length writes are not acknowledgement.
+Reopening does not repair media position or authorize blind record replay.
