@@ -11,6 +11,7 @@ int main(void)
 
     assert(sizeof(struct oa_aspitape_mtop) == 6u);
     assert(sizeof(struct oa_aspitape_mtget) == 14u);
+    assert(sizeof(struct oa_aspitape_mtget16) == 16u);
 
     all = OT_BACKEND_HAVE_LEGACY_TAPE |
           OT_BACKEND_HAVE_OPENASPI |
