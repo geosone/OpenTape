@@ -15,7 +15,9 @@ An eventual historical-driver fallback must select the correct ABI explicitly;
 it cannot infer a third-party driver's layout from the shared function number.
 
 When `OA_MT16_STATE_WRITE_ERROR` (`0200h`) is set, diagnostic fields describe
-a saved failed/short buffered write, not the most recent readiness command.
+a saved failed/short buffered write or failed written-session finalization,
+not the most recent readiness command. Finalization failures cover filemarks,
+backspacing and close rewind for both raw and buffered device names.
 Display and retain that failure even if `MTNOP` succeeds. The snapshot survives
 close and reopen; only a full, successful physical data write in a new session
 clears it. Buffered acceptance and zero-length writes are not acknowledgement.
