@@ -16,10 +16,14 @@ the media. LTFS remains a later optional backend for supported drives. See
 [docs/tape-formats.md](docs/tape-formats.md) and
 [docs/native-volume-format.md](docs/native-volume-format.md).
 
-This repository is at the bootstrap stage. It currently provides buildable
-DOS and wxWindows Win16 start screens, the backend-selection contract, the
-shared OpenASPI ASPITAPE definitions, and host-side tests. It does not read or
-write tapes yet.
+This repository is at the bootstrap stage. It provides DOS and wxWindows
+Win16 start screens, a read-only DOS tape-status backend, the native-format
+codec and host-side tests. Backup/restore and tape data transfers are not
+implemented yet.
+
+Under DOS, `OPENTAPE --status` queries `NRMT0` without moving or writing the
+tape; `--status --device NRMT1` selects another no-rewind alias. See the
+[legacy backend](backends/legacy_tape/README.md) and [testing guide](docs/testing.md).
 
 The DOS interface directly uses Open386MAX's QUILIB.  No private window,
 dialog, keyboard, mouse, or colour implementation is kept in this repository.

@@ -11,6 +11,7 @@
 
 #include "opentape/backend.h"
 #include "opentape/messages.h"
+#include "opentape/tape_probe.h"
 
 static void usage(void)
 {
@@ -72,12 +73,48 @@ static void show_ui(enum ot_backend_kind selected)
     clear_ui();
 }
 
+static int print_tape_status(const char *name)
+{
+    struct ot_tape_status status;
+    unsigned dos_error;
+    int rc;
+
+    rc = ot_dos_tape_probe(name, &status, &dos_error);
+    if (rc != OT_PROBE_OK) {
+        fprintf(stderr, OT_MSG_PROBE_ERROR, name, rc, dos_error);
+        return 2;
+    }
+    printf(OT_MSG_PROBE_STATUS, name, (unsigned)status.tape.host_id,
+           (unsigned)status.tape.target_id, (unsigned)status.tape.lun,
+           (unsigned)status.tape.current_state,
+           (unsigned)status.tape.fixed_block_size);
+    printf(OT_MSG_PROBE_SCSI, (unsigned)status.tape.last_scsi_status,
+           (unsigned)status.tape.last_sense_key,
+           (unsigned)status.tape.last_scsi_opcode,
+           (unsigned)status.tape.residual_bytes);
+    if (status.extended) {
+        printf(OT_MSG_PROBE_ABI, 16u, (unsigned)status.tape.driver_error);
+    } else {
+        puts(OT_MSG_PROBE_LEGACY);
+    }
+    puts(OT_MSG_PROBE_READONLY);
+    return 0;
+}
+
 int main(int argc, char **argv)
 {
     enum ot_backend_kind selected;
 
-    if (argc > 1 && strcmp(argv[1], "--help") != 0 &&
-        strcmp(argv[1], "/?") != 0) {
+    if (argc > 1 && (strcmp(argv[1], "--status") == 0 ||
+                     strcmp(argv[1], "/STATUS") == 0)) {
+        if (argc == 2) return print_tape_status("NRMT0");
+        if (argc == 4 && strcmp(argv[2], "--device") == 0 &&
+            ot_probe_name_valid(argv[3])) return print_tape_status(argv[3]);
+        usage();
+        return 1;
+    }
+    if (argc > 2 || (argc > 1 && strcmp(argv[1], "--help") != 0 &&
+        strcmp(argv[1], "/?") != 0)) {
         fputs(OT_MSG_UNKNOWN_OPTION, stderr);
         fputc('\n', stderr);
         usage();

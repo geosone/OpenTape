@@ -1,6 +1,8 @@
 # Roadmap
 
-1. Probe historical device names and retrieve `mtget` without changing media.
+1. [partial] Query a selected no-rewind device and retrieve `mtget` without
+   changing media (implemented, including the OpenASPI 16-byte extension;
+   automatic enumeration remains).
 2. Implement rewind, status, load/unload and spacing in a small CLI tool.
 3. Add variable- and fixed-block streaming reads with filemark handling.
 4. Add write support behind explicit write-protection and confirmation checks.

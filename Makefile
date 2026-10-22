@@ -16,6 +16,7 @@ DOSBIN  := $(BUILD)/dos/OPENTAPE.EXE
 WINBIN  := $(BUILD)/win16/OTAPEWIN.EXE
 HOSTBIN := $(BUILD)/host/test_backend
 HOSTFORMATBIN := $(BUILD)/host/test_volume_format
+HOSTPROBEBIN := $(BUILD)/host/test_tape_probe
 DISTDIR := $(BUILD)/dist
 INSTALL_CFG := installer/INSTALL.$(MAXLANG)
 INSTALL_README := installer/README.$(MAXLANG)
@@ -37,15 +38,19 @@ CPPFLAGS += -Iinclude
 CPPFLAGS += -I$(OPENASPI)/include
 CPPFLAGS += -DLANG_$(MAXLANG)
 
-.PHONY: all win16 test check languages dist clean
+.PHONY: all win16 test check dos-status-smoke languages dist clean
 
-all: $(DOSBIN) $(HOSTBIN) $(HOSTFORMATBIN)
+all: $(DOSBIN) $(HOSTBIN) $(HOSTFORMATBIN) $(HOSTPROBEBIN)
 
-test: $(HOSTBIN) $(HOSTFORMATBIN)
+test: $(HOSTBIN) $(HOSTFORMATBIN) $(HOSTPROBEBIN)
 	$(HOSTBIN)
 	$(HOSTFORMATBIN)
+	$(HOSTPROBEBIN)
 
 check: all test win16
+
+dos-status-smoke: all
+	MAXLANG=$(MAXLANG) OPENASPI=$(abspath $(OPENASPI)) bash tests/dos_status.sh
 
 win16: $(WINBIN)
 
@@ -54,7 +59,10 @@ languages:
 	$(MAKE) MAXLANG=GR BUILD=build/GR dist
 
 $(DOSBIN): src/main.c core/backend.c include/opentape/backend.h \
-		include/opentape/messages.h dos.mk
+		include/opentape/messages.h include/opentape/tape_probe.h \
+		core/tape_probe.c backends/legacy_tape/legacy_dos.c \
+		core/volume_format.c include/opentape/volume_format.h \
+		$(OPENASPI)/include/openaspi/aspitape.h dos.mk
 	$(MAKE) -f dos.mk OPEN386MAX=$(abspath $(OPEN386MAX)) \
 		OPENASPI=$(abspath $(OPENASPI)) \
 		MAXLANG=$(MAXLANG) \
@@ -71,6 +79,11 @@ $(HOSTFORMATBIN): tests/test_volume_format.c core/volume_format.c \
 	mkdir -p $(@D)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ tests/test_volume_format.c \
 		core/volume_format.c
+
+$(HOSTPROBEBIN): tests/test_tape_probe.c core/tape_probe.c \
+		include/opentape/tape_probe.h $(OPENASPI)/include/openaspi/aspitape.h
+	mkdir -p $(@D)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ tests/test_tape_probe.c core/tape_probe.c
 
 $(BUILD)/win16/opentape.obj: frontends/win16/opentape.cpp \
 		include/opentape/backend.h include/opentape/messages.h $(WXLIB)
