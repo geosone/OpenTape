@@ -20,6 +20,12 @@ roundtrips, DOS attributes and calendar dates, path length boundaries, truncated
 metadata, reserved fields and device/traversal names. The scanner must reject
 malicious typed payloads even when all block and fragment CRCs are valid, without
 committing partial state. Both host sanitizers also cover these payload tests.
+Archive-state tests additionally cover fragmented whole-file CRCs against the
+standard `123456789` reference, empty files, directories, multiple sessions,
+wrong IDs/times, premature endings, gaps/duplicate fragments, bad totals,
+unsupported records and whole-block rollback. Counter overflow/carry cases
+inject boundary state; they do not claim multi-gigabyte tape qualification.
+The same state tests pass with both host sanitizers.
 
 ## DOS status integration
 
@@ -100,17 +106,21 @@ They also run `PAYTEST.EXE`, a DOS build of the typed-payload tests, with a
 separate required success marker/exit. These in-memory tests do not write tapes
 or create restored files. English and German integration runs passed with both
 test programs on 2026-10-22.
+`VERTEST.EXE` now runs the archive-state fixtures under DOS as well, including
+positive closed sessions and deliberately incomplete/corrupt sequences. Its
+success marker and DOS exit are separately required. English/German runs passed.
 
 `make dos-native-smoke` selects a separate integration mode using the same
 environment and known non-native scratch fixture as the data-read test. After
 identity verification it explicitly rewinds that virtual cartridge on the host.
-The actual `OPENTAPE --scan` command must reject its first record with bad magic
-and exit `2`; raw driver-test bytes must never be mistaken for an OpenTape
-volume. English/German tests passed on 2026-10-22; logs are in
+The actual `OPENTAPE --scan` and `--verify` commands run in succession and must
+each reject a non-native record with bad magic and exit `2`; raw driver-test
+bytes must never be mistaken for an OpenTape volume. English/German tests
+passed on 2026-10-22; logs are in
 `build/US/dos-native/` and `build/GR/dos-native/`.
 
 These tests establish positive framing parsing in DOS memory and negative
 format recognition through DOS ASPI/mhVTL. No valid native tape has been written
 or successfully scanned end-to-end yet. This is not backup/restore qualification.
-The native rejection test leaves the tape after the first physical record;
+The native rejection test leaves the tape after the second physical record;
 the raw-read regression leaves it after the first filemark. No media is written.

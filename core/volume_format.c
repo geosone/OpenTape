@@ -7,7 +7,7 @@ static const oa_u8 ot_block_magic[4] = { 'O', 'T', 'B', '1' };
 static const oa_u8 ot_volume_magic[8] =
     { 'O', 'P', 'E', 'N', 'T', 'A', 'P', 'E' };
 
-oa_u32 ot_crc32(const oa_u8 *data, oa_u16 size)
+oa_u32 ot_crc32_extend(oa_u32 previous, const oa_u8 *data, oa_u16 size)
 {
     oa_u32 crc;
     oa_u16 i;
@@ -17,7 +17,7 @@ oa_u32 ot_crc32(const oa_u8 *data, oa_u16 size)
         return 0ul;
     }
 
-    crc = 0xfffffffful;
+    crc = previous ^ 0xfffffffful;
     for (i = 0u; i < size; ++i) {
         crc ^= (oa_u32)data[i];
         for (bit = 0u; bit < 8u; ++bit) {
@@ -29,6 +29,11 @@ oa_u32 ot_crc32(const oa_u8 *data, oa_u16 size)
         }
     }
     return crc ^ 0xfffffffful;
+}
+
+oa_u32 ot_crc32(const oa_u8 *data, oa_u16 size)
+{
+    return ot_crc32_extend(0ul, data, size);
 }
 
 int ot_block_encode(oa_u8 *block, oa_u16 block_capacity,

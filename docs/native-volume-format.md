@@ -112,7 +112,8 @@ behavior after framing/CRC checks.
 It stops at the first error. It does not yet resynchronize after corruption,
 reconstruct objects/fragments across blocks, enforce session/file ordering or
 cross-check completion totals/whole-file CRCs. It cannot establish that a
-backup is complete. Block FIRST/LAST
+backup is complete. A separate [stateful verifier](archive-verification.md)
+now checks the sequential file/session profile across blocks. Block FIRST/LAST
 flags alone are not used as evidence of complete backup or volume termination.
 The parser accepts individual blocks up to the format's 65,535-byte limit;
 the initial DOS CLI uses a 32 KiB transport buffer.
@@ -130,7 +131,7 @@ Exit codes are `0` valid framing through the first filemark, `1` bad arguments,
 Mandatory fixed-block transports are rejected before data reads: reassembly
 of serialized logical blocks from physical fixed units is not implemented yet.
 The raw `--read-test` diagnostic remains available independently of this format
-restriction. The native writer and recovery state machine are still pending.
+restriction. The native writer and damaged-record recovery are still pending.
 
 ## File and session payloads, version 1
 
@@ -154,7 +155,8 @@ A full 32-byte name need not contain NUL; after the first NUL all remaining
 bytes must be zero. Names are display data, never filesystem paths. The writer
 must assign a nonzero session ID in containing block headers, use the session
 creation time as their session time, and emit SESSION_START before its files.
-Those cross-record invariants are not yet enforced by the framing scanner.
+Those cross-record invariants are enforced by the separate sequential verifier,
+not by the framing scanner alone.
 
 ### File metadata (20-byte prefix plus path)
 
@@ -224,6 +226,6 @@ not verify file completion or the whole-file checksum.
 The 64-bit aggregate is represented as two words so DOS does not need a native
 64-bit C type. Source read errors or changed/incomplete files must never be
 reported as a complete session. A missing end leaves a session incomplete.
-The framing scanner accepts the shape of either result; a later stateful
-verifier must validate ordering, totals, file CRCs and completeness before
-claiming a successful backup or restore.
+The framing scanner accepts the shape of either result. The sequential verifier
+checks ordering, totals and file CRCs and rejects incomplete sessions; this still
+does not establish whole-volume completeness or successful restore.

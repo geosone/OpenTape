@@ -16,6 +16,7 @@
 #include "opentape/tape_reader.h"
 #include "opentape/volume_format.h"
 #include "opentape/native_scan.h"
+#include "opentape/archive_verify.h"
 
 static void usage(void)
 {
@@ -23,6 +24,7 @@ static void usage(void)
     puts(OT_MSG_USAGE);
     puts(OT_MSG_READ_USAGE);
     puts(OT_MSG_SCAN_USAGE);
+    puts(OT_MSG_VERIFY_USAGE);
     puts(OT_MSG_NOT_IMPLEMENTED);
 }
 
@@ -110,6 +112,13 @@ static int print_tape_status(const char *name)
 static const char *scan_error_reason(int rc)
 {
     switch (rc) {
+    case OT_VERIFY_ORDER: return OT_MSG_VERIFY_ORDER;
+    case OT_VERIFY_FILE_DATA: return OT_MSG_VERIFY_DATA;
+    case OT_VERIFY_FILE_CRC: return OT_MSG_SCAN_CRC;
+    case OT_VERIFY_SUMMARY: return OT_MSG_VERIFY_SUMMARY;
+    case OT_VERIFY_INCOMPLETE: return OT_MSG_VERIFY_INCOMPLETE;
+    case OT_VERIFY_UNSUPPORTED: return OT_MSG_VERIFY_UNKNOWN;
+    case OT_VERIFY_OVERFLOW: return OT_MSG_SCAN_SEQUENCE;
     case OT_FORMAT_BAD_MAGIC: return OT_MSG_SCAN_MAGIC;
     case OT_FORMAT_BAD_VERSION: return OT_MSG_SCAN_VERSION;
     case OT_FORMAT_BAD_HEADER_CRC:
@@ -126,6 +135,7 @@ static int read_tape_test(const char *name, int native)
 {
     struct ot_tape_reader reader;
     struct ot_native_scan scan;
+    struct ot_archive_verify verify;
     char label_name[33];
     unsigned char *buffer;
     unsigned count, bytes, capacity, block_size, i;
@@ -147,6 +157,7 @@ static int read_tape_test(const char *name, int native)
     capacity = OT_BLOCK_RECOMMENDED_SIZE;
     block_size = reader.status.tape.fixed_block_size;
     memset(&scan, 0, sizeof(scan));
+    memset(&verify, 0, sizeof(verify));
     if (native && (reader.status.tape.device_parameters & OA_MT_PARAM_FIXED_BLOCK) != 0u) {
         fprintf(stderr, OT_MSG_PROBE_ERROR, name, OT_READ_BAD_MODE, 0u);
         ot_reader_close(&reader);
@@ -166,9 +177,14 @@ static int read_tape_test(const char *name, int native)
                     printf(OT_MSG_SCAN_ERROR, OT_SCAN_MISSING_LABEL,
                            scan_error_reason(OT_SCAN_MISSING_LABEL), 0ul);
                     exit_code = 2;
+                } else if (native == 2 && (rc = ot_archive_verify_finish(&verify)) != OT_FORMAT_OK) {
+                    printf(OT_MSG_SCAN_ERROR, rc, scan_error_reason(rc),
+                           (unsigned long)scan.blocks);
+                    exit_code = 2;
                 } else {
                     printf(OT_MSG_SCAN_EOF, (unsigned long)scan.blocks,
                            (unsigned long)scan.records);
+                    if (native == 2) printf(OT_MSG_VERIFY_OK, (unsigned long)verify.sessions);
                     puts(OT_MSG_SCAN_PARTIAL);
                     exit_code = 0;
                 }
@@ -188,7 +204,10 @@ static int read_tape_test(const char *name, int native)
             break;
         }
         if (native) {
-            rc = ot_native_scan_block(&scan, buffer, (oa_u16)bytes);
+            if (native == 2) {
+                rc = ot_archive_verify_block(&verify, buffer, (oa_u16)bytes);
+                scan = verify.framing;
+            } else rc = ot_native_scan_block(&scan, buffer, (oa_u16)bytes);
             if (rc != OT_FORMAT_OK) {
                 printf(OT_MSG_SCAN_ERROR, rc, scan_error_reason(rc),
                        (unsigned long)scan.blocks);
@@ -227,8 +246,8 @@ int main(int argc, char **argv)
     enum ot_backend_kind selected;
 
     if (argc > 1 && (strcmp(argv[1], "--read-test") == 0 ||
-                     strcmp(argv[1], "--scan") == 0)) {
-        int native = strcmp(argv[1], "--scan") == 0;
+                     strcmp(argv[1], "--scan") == 0 || strcmp(argv[1], "--verify") == 0)) {
+        int native = strcmp(argv[1], "--verify") == 0 ? 2 : strcmp(argv[1], "--scan") == 0;
         if (argc == 2) return read_tape_test("NRMT0", native);
         if (argc == 4 && strcmp(argv[2], "--device") == 0 &&
             ot_probe_name_valid(argv[3]) &&

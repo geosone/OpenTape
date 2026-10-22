@@ -67,6 +67,8 @@ struct ot_volume_label {
 };
 
 oa_u32 ot_crc32(const oa_u8 *data, oa_u16 size);
+/* Extend a finalized CRC; start with zero for an empty byte stream. */
+oa_u32 ot_crc32_extend(oa_u32 previous, const oa_u8 *data, oa_u16 size);
 
 int ot_block_encode(oa_u8 *block, oa_u16 block_capacity,
                     const struct ot_block_header *header,

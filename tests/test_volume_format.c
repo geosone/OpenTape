@@ -10,6 +10,8 @@ static void test_crc32(void)
 
     assert(ot_crc32(check, 9u) == 0xcbf43926ul);
     assert(ot_crc32(check, 0u) == 0ul);
+    assert(ot_crc32_extend(ot_crc32(check, 3u), check + 3, 6u) == 0xcbf43926ul);
+    assert(ot_crc32_extend(0xcbf43926ul, 0, 0u) == 0xcbf43926ul);
 }
 
 static void test_block(void)

@@ -22,6 +22,8 @@ HOSTNATIVEBIN := $(BUILD)/host/test_native_scan
 DOSNATIVEBIN := $(BUILD)/dos/NATTEST.EXE
 HOSTPAYLOADBIN := $(BUILD)/host/test_record_payload
 DOSPAYLOADBIN := $(BUILD)/dos/PAYTEST.EXE
+HOSTVERIFYBIN := $(BUILD)/host/test_archive_verify
+DOSVERIFYBIN := $(BUILD)/dos/VERTEST.EXE
 DISTDIR := $(BUILD)/dist
 INSTALL_CFG := installer/INSTALL.$(MAXLANG)
 INSTALL_README := installer/README.$(MAXLANG)
@@ -45,15 +47,16 @@ CPPFLAGS += -DLANG_$(MAXLANG)
 
 .PHONY: all win16 test check dos-status-smoke dos-read-smoke dos-native-smoke languages dist clean
 
-all: $(DOSBIN) $(DOSNATIVEBIN) $(DOSPAYLOADBIN) $(HOSTBIN) $(HOSTFORMATBIN) $(HOSTPROBEBIN) $(HOSTREADERBIN) $(HOSTNATIVEBIN) $(HOSTPAYLOADBIN)
+all: $(DOSBIN) $(DOSNATIVEBIN) $(DOSPAYLOADBIN) $(DOSVERIFYBIN) $(HOSTBIN) $(HOSTFORMATBIN) $(HOSTPROBEBIN) $(HOSTREADERBIN) $(HOSTNATIVEBIN) $(HOSTPAYLOADBIN) $(HOSTVERIFYBIN)
 
-test: $(HOSTBIN) $(HOSTFORMATBIN) $(HOSTPROBEBIN) $(HOSTREADERBIN) $(HOSTNATIVEBIN) $(HOSTPAYLOADBIN)
+test: $(HOSTBIN) $(HOSTFORMATBIN) $(HOSTPROBEBIN) $(HOSTREADERBIN) $(HOSTNATIVEBIN) $(HOSTPAYLOADBIN) $(HOSTVERIFYBIN)
 	$(HOSTBIN)
 	$(HOSTFORMATBIN)
 	$(HOSTPROBEBIN)
 	$(HOSTREADERBIN)
 	$(HOSTNATIVEBIN)
 	$(HOSTPAYLOADBIN)
+	$(HOSTVERIFYBIN)
 
 check: all test win16
 
@@ -79,6 +82,7 @@ $(DOSBIN): src/main.c core/backend.c include/opentape/backend.h \
 		core/tape_reader.c include/opentape/tape_reader.h \
 		core/native_scan.c include/opentape/native_scan.h \
 		core/record_payload.c include/opentape/record_payload.h core/wire.h \
+		core/archive_verify.c include/opentape/archive_verify.h \
 		$(OPENASPI)/include/openaspi/aspitape.h dos.mk
 	$(MAKE) -f dos.mk OPEN386MAX=$(abspath $(OPEN386MAX)) \
 		OPENASPI=$(abspath $(OPENASPI)) \
@@ -96,6 +100,14 @@ $(DOSNATIVEBIN): tests/test_native_scan.c core/native_scan.c \
 
 $(DOSPAYLOADBIN): tests/test_record_payload.c core/record_payload.c core/native_scan.c \
 		core/volume_format.c core/wire.h include/opentape/record_payload.h \
+		include/opentape/native_scan.h include/opentape/volume_format.h dos.mk
+	$(MAKE) -f dos.mk OPEN386MAX=$(abspath $(OPEN386MAX)) \
+		OPENASPI=$(abspath $(OPENASPI)) MAXLANG=$(MAXLANG) \
+		OUT=$(abspath $(BUILD)/dos-obj) BINDIR=$(abspath $(BUILD)/dos) $(abspath $@)
+
+$(DOSVERIFYBIN): tests/test_archive_verify.c core/archive_verify.c \
+		core/record_payload.c core/native_scan.c core/volume_format.c core/wire.h \
+		include/opentape/archive_verify.h include/opentape/record_payload.h \
 		include/opentape/native_scan.h include/opentape/volume_format.h dos.mk
 	$(MAKE) -f dos.mk OPEN386MAX=$(abspath $(OPEN386MAX)) \
 		OPENASPI=$(abspath $(OPENASPI)) MAXLANG=$(MAXLANG) \
@@ -136,6 +148,14 @@ $(HOSTPAYLOADBIN): tests/test_record_payload.c core/record_payload.c core/volume
 	mkdir -p $(@D)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ tests/test_record_payload.c \
 		core/record_payload.c core/volume_format.c core/native_scan.c
+
+$(HOSTVERIFYBIN): tests/test_archive_verify.c core/archive_verify.c \
+		core/native_scan.c core/volume_format.c core/record_payload.c core/wire.h \
+		include/opentape/archive_verify.h include/opentape/native_scan.h \
+		include/opentape/volume_format.h include/opentape/record_payload.h
+	mkdir -p $(@D)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ tests/test_archive_verify.c \
+		core/archive_verify.c core/native_scan.c core/volume_format.c core/record_payload.c
 
 $(BUILD)/win16/opentape.obj: frontends/win16/opentape.cpp \
 		include/opentape/backend.h include/opentape/messages.h $(WXLIB)
