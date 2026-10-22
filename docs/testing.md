@@ -10,6 +10,11 @@ Reader tests cover raw-mode setup, short data, filemarks and continuation,
 fixed-block alignment, invalid counts, failed-state/no-retry behavior,
 diagnostic failure precedence and cleanup. They also pass with AddressSanitizer
 and UndefinedBehaviorSanitizer on the host.
+Native-scanner tests cover valid labels and unknown records, every truncated
+prefix of a label block, block/fragment CRC errors, record-count/length and
+sequence mismatches, duplicate/bad labels, invalid fragment offsets and counter
+overflow. A host-only test validates a full 65,535-byte block with outer guards.
+Native scanner tests also pass with both host sanitizers.
 
 ## DOS status integration
 
@@ -79,3 +84,24 @@ English and German read tests passed on 2026-10-22 through Tekram 1.60 and
 mhVTL with the local QEMU patch. Logs are under `build/US/dos-read/` and
 `build/GR/dos-read/`. The final tape position is after the first filemark;
 no automatic cleanup rewind is performed. No physical tapes were tested.
+
+## Native framing under DOS
+
+All integration modes additionally run `NATTEST.EXE`, a DOS build of the same
+native-scanner positive/negative fixtures (excluding the large host-only boundary
+case). This test executable runs entirely in memory and is not distributed
+as part of the user application. Its success marker and DOS exit are required.
+
+`make dos-native-smoke` selects a separate integration mode using the same
+environment and known non-native scratch fixture as the data-read test. After
+identity verification it explicitly rewinds that virtual cartridge on the host.
+The actual `OPENTAPE --scan` command must reject its first record with bad magic
+and exit `2`; raw driver-test bytes must never be mistaken for an OpenTape
+volume. English/German tests passed on 2026-10-22; logs are in
+`build/US/dos-native/` and `build/GR/dos-native/`.
+
+These tests establish positive framing parsing in DOS memory and negative
+format recognition through DOS ASPI/mhVTL. No valid native tape has been written
+or successfully scanned end-to-end yet. This is not backup/restore qualification.
+The native rejection test leaves the tape after the first physical record;
+the raw-read regression leaves it after the first filemark. No media is written.

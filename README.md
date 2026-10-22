@@ -27,6 +27,9 @@ tape; `--status --device NRMT1` selects another no-rewind alias. See the
 prints byte counts/CRC32 values until a filemark. It moves the tape by reading,
 but does not rewind, write or restore files. This is a transport diagnostic,
 not yet native-backup verification.
+`OPENTAPE --scan` instead checks native block/record framing and displays the
+volume label. It requires the volume beginning at the current position;
+complete backup verification and restore remain later steps.
 
 The DOS interface directly uses Open386MAX's QUILIB.  No private window,
 dialog, keyboard, mouse, or colour implementation is kept in this repository.

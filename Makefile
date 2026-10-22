@@ -18,6 +18,8 @@ HOSTBIN := $(BUILD)/host/test_backend
 HOSTFORMATBIN := $(BUILD)/host/test_volume_format
 HOSTPROBEBIN := $(BUILD)/host/test_tape_probe
 HOSTREADERBIN := $(BUILD)/host/test_tape_reader
+HOSTNATIVEBIN := $(BUILD)/host/test_native_scan
+DOSNATIVEBIN := $(BUILD)/dos/NATTEST.EXE
 DISTDIR := $(BUILD)/dist
 INSTALL_CFG := installer/INSTALL.$(MAXLANG)
 INSTALL_README := installer/README.$(MAXLANG)
@@ -39,15 +41,16 @@ CPPFLAGS += -Iinclude
 CPPFLAGS += -I$(OPENASPI)/include
 CPPFLAGS += -DLANG_$(MAXLANG)
 
-.PHONY: all win16 test check dos-status-smoke dos-read-smoke languages dist clean
+.PHONY: all win16 test check dos-status-smoke dos-read-smoke dos-native-smoke languages dist clean
 
-all: $(DOSBIN) $(HOSTBIN) $(HOSTFORMATBIN) $(HOSTPROBEBIN) $(HOSTREADERBIN)
+all: $(DOSBIN) $(DOSNATIVEBIN) $(HOSTBIN) $(HOSTFORMATBIN) $(HOSTPROBEBIN) $(HOSTREADERBIN) $(HOSTNATIVEBIN)
 
-test: $(HOSTBIN) $(HOSTFORMATBIN) $(HOSTPROBEBIN) $(HOSTREADERBIN)
+test: $(HOSTBIN) $(HOSTFORMATBIN) $(HOSTPROBEBIN) $(HOSTREADERBIN) $(HOSTNATIVEBIN)
 	$(HOSTBIN)
 	$(HOSTFORMATBIN)
 	$(HOSTPROBEBIN)
 	$(HOSTREADERBIN)
+	$(HOSTNATIVEBIN)
 
 check: all test win16
 
@@ -56,6 +59,9 @@ dos-status-smoke: all
 
 dos-read-smoke: all
 	OPENTAPE_READ_TEST=1 MAXLANG=$(MAXLANG) OPENASPI=$(abspath $(OPENASPI)) bash tests/dos_status.sh
+
+dos-native-smoke: all
+	OPENTAPE_NATIVE_TEST=1 MAXLANG=$(MAXLANG) OPENASPI=$(abspath $(OPENASPI)) bash tests/dos_status.sh
 
 win16: $(WINBIN)
 
@@ -68,12 +74,20 @@ $(DOSBIN): src/main.c core/backend.c include/opentape/backend.h \
 		core/tape_probe.c backends/legacy_tape/legacy_dos.c \
 		core/volume_format.c include/opentape/volume_format.h \
 		core/tape_reader.c include/opentape/tape_reader.h \
+		core/native_scan.c include/opentape/native_scan.h \
 		$(OPENASPI)/include/openaspi/aspitape.h dos.mk
 	$(MAKE) -f dos.mk OPEN386MAX=$(abspath $(OPEN386MAX)) \
 		OPENASPI=$(abspath $(OPENASPI)) \
 		MAXLANG=$(MAXLANG) \
 		OUT=$(abspath $(BUILD)/dos-obj) BINDIR=$(abspath $(BUILD)/dos) \
 		$(abspath $@)
+
+$(DOSNATIVEBIN): tests/test_native_scan.c core/native_scan.c \
+		core/volume_format.c include/opentape/native_scan.h \
+		include/opentape/volume_format.h dos.mk
+	$(MAKE) -f dos.mk OPEN386MAX=$(abspath $(OPEN386MAX)) \
+		OPENASPI=$(abspath $(OPENASPI)) MAXLANG=$(MAXLANG) \
+		OUT=$(abspath $(BUILD)/dos-obj) BINDIR=$(abspath $(BUILD)/dos) $(abspath $@)
 
 $(HOSTBIN): tests/test_backend.c core/backend.c include/opentape/backend.h \
 		include/opentape/messages.h $(OPENASPI)/include/openaspi/aspitape.h
@@ -96,6 +110,12 @@ $(HOSTREADERBIN): tests/test_tape_reader.c core/tape_reader.c core/tape_probe.c 
 	mkdir -p $(@D)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ tests/test_tape_reader.c \
 		core/tape_reader.c core/tape_probe.c
+
+$(HOSTNATIVEBIN): tests/test_native_scan.c core/native_scan.c core/volume_format.c \
+		include/opentape/native_scan.h include/opentape/volume_format.h
+	mkdir -p $(@D)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ tests/test_native_scan.c \
+		core/native_scan.c core/volume_format.c
 
 $(BUILD)/win16/opentape.obj: frontends/win16/opentape.cpp \
 		include/opentape/backend.h include/opentape/messages.h $(WXLIB)

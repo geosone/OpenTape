@@ -6,10 +6,19 @@ OPENASPI=${OPENASPI:-$ROOT/deps/OpenASPI}
 MAXLANG=${MAXLANG:-US}
 OUT="$ROOT/build/$MAXLANG/dos-status"
 read_test=${OPENTAPE_READ_TEST:-0}
+native_test=${OPENTAPE_NATIVE_TEST:-0}
 case "$read_test" in
     0) ;;
     1) OUT="$ROOT/build/$MAXLANG/dos-read" ;;
     *) echo 'OPENTAPE_READ_TEST must be 0 or 1' >&2; exit 1 ;;
+esac
+case "$native_test" in
+    0) ;;
+    1)
+        test "$read_test" = 0 || { echo 'Select only one data test mode' >&2; exit 1; }
+        OUT="$ROOT/build/$MAXLANG/dos-native"
+        ;;
+    *) echo 'OPENTAPE_NATIVE_TEST must be 0 or 1' >&2; exit 1 ;;
 esac
 QEMU_BIN=${QEMU_BIN:-qemu-system-i386}
 JWASM=${JWASM:-$ROOT/deps/Open386MAX/linux/bin/jwasm}
@@ -45,8 +54,19 @@ if test "$read_test" = 1; then
         'ECHO OpenTape DOS read passed > AUX'
     )
 fi
+native_lines=()
+if test "$native_test" = 1; then
+    native_lines=(
+        'OPENTAPE --scan > AUX'
+        'IF ERRORLEVEL 3 GOTO failed'
+        'IF NOT ERRORLEVEL 2 GOTO failed'
+        'ECHO OpenTape DOS non-native rejection passed > AUX'
+    )
+fi
 lines=(
     '@ECHO OFF'
+    'NATTEST > AUX'
+    'IF ERRORLEVEL 1 GOTO failed'
     'OPENTAPE --help > AUX'
     'IF ERRORLEVEL 1 GOTO failed'
     'OPENTAPE --status > AUX'
@@ -63,6 +83,7 @@ lines=(
     'IF ERRORLEVEL 3 GOTO failed'
     'IF NOT ERRORLEVEL 2 GOTO failed'
     "${read_lines[@]}"
+    "${native_lines[@]}"
     'ECHO OpenTape DOS status passed > AUX'
     'GOTO finished'
     ':failed'
@@ -72,14 +93,14 @@ lines=(
 )
 printf '%s\r\n' "${lines[@]}" > "$OUT/AUTOEXEC.BAT"
 mcopy -o -i "$OUT/boot.img" "$OUT/OPENTAPE.EXE" "$OUT/QEXIT.COM" \
-    "$OUT/AUTOEXEC.BAT" ::/
+    "$OUT/AUTOEXEC.BAT" "$ROOT/build/$MAXLANG/dos/NATTEST.EXE" ::/
 # A regular file with a device-like name must never be accepted as a tape.
 mcopy -o -i "$OUT/boot.img" "$ROOT/LICENSE" ::/NRMT3
 address=$(basename "$(readlink -f "/sys/class/scsi_generic/$(basename "$MHVTL_TAPE")/device")")
 IFS=: read -r host channel target lun <<< "$address"
 guest_target=$((10#$target % 8))
 verify_tape
-if test "$read_test" = 1; then
+if test "$read_test" = 1 || test "$native_test" = 1; then
     # Explicitly gated, host-side rewind of the approved virtual fixture only.
     # The application itself never rewinds. No media data is written here.
     sg_raw "$MHVTL_TAPE" 01 00 00 00 00 00 > "$OUT/rewind.log" 2>&1
@@ -108,6 +129,7 @@ if test "$rc" = 124; then echo 'DOS status test timed out' >&2; exit 1; fi
 if test "$rc" != 1; then echo "Unexpected QEMU exit: $rc" >&2; exit 1; fi
 tr -d '\r' < "$OUT/serial.log"
 grep -q 'OpenTape DOS status passed' "$OUT/serial.log"
+grep -q 'OpenTape native framing tests passed' "$OUT/serial.log"
 grep -q "NRMT0 ASPI 00:0$guest_target:0$lun" "$OUT/serial.log"
 ! grep -q 'FAILED' "$OUT/serial.log"
 if test "$read_test" = 1; then
@@ -117,5 +139,9 @@ if test "$read_test" = 1; then
     grep -q 'Block 1: 1024 .*CRC32=76A5CF1D' "$OUT/serial.log"
     grep -q 'Block 2: 1024 .*CRC32=4D13C3E7' "$OUT/serial.log"
 fi
+if test "$native_test" = 1; then
+    grep -q 'OpenTape DOS non-native rejection passed' "$OUT/serial.log"
+    grep -Eq '(Format error|Formatfehler) -2 ' "$OUT/serial.log"
+fi
 mtype -i "$OUT/boot.img" ::/NRMT3 | cmp - "$ROOT/LICENSE"
-echo "OpenTape $MAXLANG read-only DOS status smoke passed (data read: $read_test)"
+echo "OpenTape $MAXLANG DOS smoke passed (read: $read_test, native rejection: $native_test)"

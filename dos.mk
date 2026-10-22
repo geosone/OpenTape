@@ -3,15 +3,15 @@ OPEN386MAX ?= deps/Open386MAX
 OPENASPI   ?= deps/OpenASPI
 PROJ       := OpenTape
 ROOT       := $(abspath $(OPEN386MAX))
-SRCDIRS    := src core backends/legacy_tape
+SRCDIRS    := src core backends/legacy_tape tests
 ASMINC     := include $(abspath $(OPENASPI))/include $(ROOT)/INCLUDE $(ROOT)/INC \
 	$(ROOT)/QUILIB $(ROOT)/386MAX
 CASEMAP    := mx
 CMODEL     := l
 CDEFS      := DOS_VERSION
-PROGS      := OPENTAPE.EXE
+PROGS      := OPENTAPE.EXE NATTEST.EXE
 
-OPENTAPE.EXE_OBJS  := MAIN.OBJ BACKEND.OBJ VOLUME.OBJ PROBE.OBJ LEGACY.OBJ READER.OBJ
+OPENTAPE.EXE_OBJS  := MAIN.OBJ BACKEND.OBJ VOLUME.OBJ PROBE.OBJ LEGACY.OBJ READER.OBJ NATIVE.OBJ
 OPENTAPE.EXE_LIBS  := $(ROOT)/build/QUILIB/LQUILIBR.LIB
 OPENTAPE.EXE_STACK := 9000
 MAIN.OBJ_SRC       := main.c
@@ -20,6 +20,10 @@ VOLUME.OBJ_SRC     := volume_format.c
 PROBE.OBJ_SRC      := tape_probe.c
 LEGACY.OBJ_SRC     := legacy_dos.c
 READER.OBJ_SRC     := tape_reader.c
+NATIVE.OBJ_SRC     := native_scan.c
+NATTEST.OBJ_SRC    := test_native_scan.c
+NATTEST.EXE_OBJS  := NATTEST.OBJ NATIVE.OBJ VOLUME.OBJ
+NATTEST.EXE_STACK := 9000
 
 $(ROOT)/linux/bin/jwasm $(ROOT)/linux/bin/jwlink:
 	$(MAKE) -C $(ROOT) -f GNUmakefile tools

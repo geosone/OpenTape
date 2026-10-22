@@ -15,12 +15,14 @@
 #include "opentape/tape_probe.h"
 #include "opentape/tape_reader.h"
 #include "opentape/volume_format.h"
+#include "opentape/native_scan.h"
 
 static void usage(void)
 {
     puts(OT_MSG_VERSION);
     puts(OT_MSG_USAGE);
     puts(OT_MSG_READ_USAGE);
+    puts(OT_MSG_SCAN_USAGE);
     puts(OT_MSG_NOT_IMPLEMENTED);
 }
 
@@ -105,11 +107,28 @@ static int print_tape_status(const char *name)
     return 0;
 }
 
-static int read_tape_test(const char *name)
+static const char *scan_error_reason(int rc)
+{
+    switch (rc) {
+    case OT_FORMAT_BAD_MAGIC: return OT_MSG_SCAN_MAGIC;
+    case OT_FORMAT_BAD_VERSION: return OT_MSG_SCAN_VERSION;
+    case OT_FORMAT_BAD_HEADER_CRC:
+    case OT_FORMAT_BAD_PAYLOAD_CRC:
+    case OT_SCAN_RECORD_CRC: return OT_MSG_SCAN_CRC;
+    case OT_SCAN_BAD_SEQUENCE: return OT_MSG_SCAN_SEQUENCE;
+    case OT_SCAN_MISSING_LABEL: return OT_MSG_SCAN_NO_LABEL;
+    case OT_SCAN_BAD_LABEL: return OT_MSG_SCAN_BAD_LABEL;
+    default: return OT_MSG_SCAN_SIZE;
+    }
+}
+
+static int read_tape_test(const char *name, int native)
 {
     struct ot_tape_reader reader;
+    struct ot_native_scan scan;
+    char label_name[33];
     unsigned char *buffer;
-    unsigned count, bytes, capacity, block_size;
+    unsigned count, bytes, capacity, block_size, i;
     unsigned long total;
     int rc, exit_code;
 
@@ -127,6 +146,13 @@ static int read_tape_test(const char *name)
     }
     capacity = OT_BLOCK_RECOMMENDED_SIZE;
     block_size = reader.status.tape.fixed_block_size;
+    memset(&scan, 0, sizeof(scan));
+    if (native && (reader.status.tape.device_parameters & OA_MT_PARAM_FIXED_BLOCK) != 0u) {
+        fprintf(stderr, OT_MSG_PROBE_ERROR, name, OT_READ_BAD_MODE, 0u);
+        ot_reader_close(&reader);
+        free(buffer);
+        return 2;                       /* fixed transport reassembly is pending */
+    }
     if ((reader.status.tape.device_parameters & OA_MT_PARAM_FIXED_BLOCK) != 0u)
         capacity = (capacity / block_size) * block_size;
     puts(OT_MSG_READ_WARNING);
@@ -135,6 +161,19 @@ static int read_tape_test(const char *name)
     for (count = 0u; count < 16u; ++count) {
         rc = ot_reader_read(&reader, buffer, capacity, &bytes);
         if (rc == OT_READ_FILEMARK) {
+            if (native) {
+                if (!scan.have_label) {
+                    printf(OT_MSG_SCAN_ERROR, OT_SCAN_MISSING_LABEL,
+                           scan_error_reason(OT_SCAN_MISSING_LABEL), 0ul);
+                    exit_code = 2;
+                } else {
+                    printf(OT_MSG_SCAN_EOF, (unsigned long)scan.blocks,
+                           (unsigned long)scan.records);
+                    puts(OT_MSG_SCAN_PARTIAL);
+                    exit_code = 0;
+                }
+                break;
+            }
             printf(OT_MSG_READ_EOF, count, total);
             exit_code = 0;
             break;
@@ -148,8 +187,29 @@ static int read_tape_test(const char *name)
             exit_code = 2;
             break;
         }
-        printf(OT_MSG_READ_BLOCK, count, bytes,
-               (unsigned long)ot_crc32(buffer, (oa_u16)bytes));
+        if (native) {
+            rc = ot_native_scan_block(&scan, buffer, (oa_u16)bytes);
+            if (rc != OT_FORMAT_OK) {
+                printf(OT_MSG_SCAN_ERROR, rc, scan_error_reason(rc),
+                       (unsigned long)scan.blocks);
+                exit_code = 2;
+                break;
+            }
+            if (scan.blocks == 1ul) {
+                memset(label_name, 0, sizeof(label_name));
+                for (i = 0u; i < 32u && scan.label.volume_name[i] != 0; ++i) {
+                    unsigned char c = (unsigned char)scan.label.volume_name[i];
+                    label_name[i] = c >= 32u && c <= 126u ? (char)c : '.';
+                }
+                printf(OT_MSG_SCAN_LABEL, label_name,
+                       (unsigned long)scan.label.volume_sequence);
+            }
+            printf(OT_MSG_SCAN_BLOCK, (unsigned long)scan.last_block.block_number,
+                   (unsigned)scan.last_block.record_count);
+        } else {
+            printf(OT_MSG_READ_BLOCK, count, bytes,
+                   (unsigned long)ot_crc32(buffer, (oa_u16)bytes));
+        }
         total += bytes;
     }
     if (exit_code == 3) puts(OT_MSG_READ_LIMIT);
@@ -166,12 +226,14 @@ int main(int argc, char **argv)
 {
     enum ot_backend_kind selected;
 
-    if (argc > 1 && strcmp(argv[1], "--read-test") == 0) {
-        if (argc == 2) return read_tape_test("NRMT0");
+    if (argc > 1 && (strcmp(argv[1], "--read-test") == 0 ||
+                     strcmp(argv[1], "--scan") == 0)) {
+        int native = strcmp(argv[1], "--scan") == 0;
+        if (argc == 2) return read_tape_test("NRMT0", native);
         if (argc == 4 && strcmp(argv[2], "--device") == 0 &&
             ot_probe_name_valid(argv[3]) &&
             (argv[3][1] == 'R' || argv[3][1] == 'r'))
-            return read_tape_test(argv[3]);
+            return read_tape_test(argv[3], native);
         usage();
         return 1;
     }
