@@ -67,6 +67,8 @@ lines=(
     '@ECHO OFF'
     'NATTEST > AUX'
     'IF ERRORLEVEL 1 GOTO failed'
+    'PAYTEST > AUX'
+    'IF ERRORLEVEL 1 GOTO failed'
     'OPENTAPE --help > AUX'
     'IF ERRORLEVEL 1 GOTO failed'
     'OPENTAPE --status > AUX'
@@ -93,7 +95,8 @@ lines=(
 )
 printf '%s\r\n' "${lines[@]}" > "$OUT/AUTOEXEC.BAT"
 mcopy -o -i "$OUT/boot.img" "$OUT/OPENTAPE.EXE" "$OUT/QEXIT.COM" \
-    "$OUT/AUTOEXEC.BAT" "$ROOT/build/$MAXLANG/dos/NATTEST.EXE" ::/
+    "$OUT/AUTOEXEC.BAT" "$ROOT/build/$MAXLANG/dos/NATTEST.EXE" \
+    "$ROOT/build/$MAXLANG/dos/PAYTEST.EXE" ::/
 # A regular file with a device-like name must never be accepted as a tape.
 mcopy -o -i "$OUT/boot.img" "$ROOT/LICENSE" ::/NRMT3
 address=$(basename "$(readlink -f "/sys/class/scsi_generic/$(basename "$MHVTL_TAPE")/device")")
@@ -130,6 +133,7 @@ if test "$rc" != 1; then echo "Unexpected QEMU exit: $rc" >&2; exit 1; fi
 tr -d '\r' < "$OUT/serial.log"
 grep -q 'OpenTape DOS status passed' "$OUT/serial.log"
 grep -q 'OpenTape native framing tests passed' "$OUT/serial.log"
+grep -q 'OpenTape typed payload tests passed' "$OUT/serial.log"
 grep -q "NRMT0 ASPI 00:0$guest_target:0$lun" "$OUT/serial.log"
 ! grep -q 'FAILED' "$OUT/serial.log"
 if test "$read_test" = 1; then

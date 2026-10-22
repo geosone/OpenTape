@@ -30,6 +30,8 @@ not yet native-backup verification.
 `OPENTAPE --scan` instead checks native block/record framing and displays the
 volume label. It requires the volume beginning at the current position;
 complete backup verification and restore remain later steps.
+File/session payload codecs and their initial DOS-8.3 schemas are now defined;
+session/file ordering checks and the actual writer remain to be implemented.
 
 The DOS interface directly uses Open386MAX's QUILIB.  No private window,
 dialog, keyboard, mouse, or colour implementation is kept in this repository.

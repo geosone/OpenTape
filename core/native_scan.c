@@ -1,4 +1,34 @@
 #include "opentape/native_scan.h"
+#include "opentape/record_payload.h"
+
+static int typed_payload(const struct ot_block_header *block,
+                           const struct ot_record_header *record, const oa_u8 *data)
+{
+    union {
+        struct ot_session_start start;
+        struct ot_session_end end;
+        struct ot_file_metadata metadata;
+        struct ot_file_end file_end;
+    } value;
+    unsigned session_record;
+    oa_u16 size = (oa_u16)record->data_size;
+
+    if (record->type < OT_RECORD_SESSION_START || record->type > OT_RECORD_SESSION_END)
+        return OT_FORMAT_OK;
+    session_record = record->type == OT_RECORD_SESSION_START || record->type == OT_RECORD_SESSION_END;
+    if (block->session_id == 0ul || (session_record ? record->object_id != 0ul : record->object_id == 0ul))
+        return OT_PAYLOAD_BAD_DATA;
+    if (record->type == OT_RECORD_FILE_DATA) return OT_FORMAT_OK;
+    if (record->fragment_offset != 0ul ||
+        record->flags != (OT_RECORD_FLAG_FIRST | OT_RECORD_FLAG_LAST)) return OT_PAYLOAD_BAD_DATA;
+    switch (record->type) {
+    case OT_RECORD_SESSION_START: return ot_session_start_decode(&value.start, data, size);
+    case OT_RECORD_SESSION_END: return ot_session_end_decode(&value.end, data, size);
+    case OT_RECORD_FILE_METADATA: return ot_file_metadata_decode(&value.metadata, data, size);
+    case OT_RECORD_FILE_END: return ot_file_end_decode(&value.file_end, data, size);
+    default: return OT_FORMAT_OK;
+    }
+}
 
 int ot_native_scan_block(struct ot_native_scan *scan,
                           const oa_u8 *block, oa_u16 size)
@@ -39,9 +69,11 @@ int ot_native_scan_block(struct ot_native_scan *scan,
             return OT_SCAN_RECORD_CRC;
         if (scan->blocks == 0ul && i == 0u && record.type != OT_RECORD_VOLUME_LABEL)
             return OT_SCAN_MISSING_LABEL;
+        rc = typed_payload(&header, &record, data);
+        if (rc != OT_FORMAT_OK) return rc;
         if (record.type == OT_RECORD_VOLUME_LABEL) {
             if (next.have_label || scan->blocks != 0ul || i != 0u ||
-                record.data_size != OT_VOLUME_LABEL_SIZE || record.fragment_offset != 0ul ||
+                record.data_size != OT_VOLUME_LABEL_SIZE || record.fragment_offset != 0ul || record.object_id != 0ul ||
                 record.flags != (OT_RECORD_FLAG_FIRST | OT_RECORD_FLAG_LAST))
                 return OT_SCAN_BAD_LABEL;
             rc = ot_volume_label_decode(&next.label, data);

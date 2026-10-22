@@ -20,6 +20,8 @@ HOSTPROBEBIN := $(BUILD)/host/test_tape_probe
 HOSTREADERBIN := $(BUILD)/host/test_tape_reader
 HOSTNATIVEBIN := $(BUILD)/host/test_native_scan
 DOSNATIVEBIN := $(BUILD)/dos/NATTEST.EXE
+HOSTPAYLOADBIN := $(BUILD)/host/test_record_payload
+DOSPAYLOADBIN := $(BUILD)/dos/PAYTEST.EXE
 DISTDIR := $(BUILD)/dist
 INSTALL_CFG := installer/INSTALL.$(MAXLANG)
 INSTALL_README := installer/README.$(MAXLANG)
@@ -43,14 +45,15 @@ CPPFLAGS += -DLANG_$(MAXLANG)
 
 .PHONY: all win16 test check dos-status-smoke dos-read-smoke dos-native-smoke languages dist clean
 
-all: $(DOSBIN) $(DOSNATIVEBIN) $(HOSTBIN) $(HOSTFORMATBIN) $(HOSTPROBEBIN) $(HOSTREADERBIN) $(HOSTNATIVEBIN)
+all: $(DOSBIN) $(DOSNATIVEBIN) $(DOSPAYLOADBIN) $(HOSTBIN) $(HOSTFORMATBIN) $(HOSTPROBEBIN) $(HOSTREADERBIN) $(HOSTNATIVEBIN) $(HOSTPAYLOADBIN)
 
-test: $(HOSTBIN) $(HOSTFORMATBIN) $(HOSTPROBEBIN) $(HOSTREADERBIN) $(HOSTNATIVEBIN)
+test: $(HOSTBIN) $(HOSTFORMATBIN) $(HOSTPROBEBIN) $(HOSTREADERBIN) $(HOSTNATIVEBIN) $(HOSTPAYLOADBIN)
 	$(HOSTBIN)
 	$(HOSTFORMATBIN)
 	$(HOSTPROBEBIN)
 	$(HOSTREADERBIN)
 	$(HOSTNATIVEBIN)
+	$(HOSTPAYLOADBIN)
 
 check: all test win16
 
@@ -75,6 +78,7 @@ $(DOSBIN): src/main.c core/backend.c include/opentape/backend.h \
 		core/volume_format.c include/opentape/volume_format.h \
 		core/tape_reader.c include/opentape/tape_reader.h \
 		core/native_scan.c include/opentape/native_scan.h \
+		core/record_payload.c include/opentape/record_payload.h core/wire.h \
 		$(OPENASPI)/include/openaspi/aspitape.h dos.mk
 	$(MAKE) -f dos.mk OPEN386MAX=$(abspath $(OPEN386MAX)) \
 		OPENASPI=$(abspath $(OPENASPI)) \
@@ -83,8 +87,16 @@ $(DOSBIN): src/main.c core/backend.c include/opentape/backend.h \
 		$(abspath $@)
 
 $(DOSNATIVEBIN): tests/test_native_scan.c core/native_scan.c \
-		core/volume_format.c include/opentape/native_scan.h \
+		core/volume_format.c core/record_payload.c core/wire.h include/opentape/native_scan.h \
+		include/opentape/record_payload.h \
 		include/opentape/volume_format.h dos.mk
+	$(MAKE) -f dos.mk OPEN386MAX=$(abspath $(OPEN386MAX)) \
+		OPENASPI=$(abspath $(OPENASPI)) MAXLANG=$(MAXLANG) \
+		OUT=$(abspath $(BUILD)/dos-obj) BINDIR=$(abspath $(BUILD)/dos) $(abspath $@)
+
+$(DOSPAYLOADBIN): tests/test_record_payload.c core/record_payload.c core/native_scan.c \
+		core/volume_format.c core/wire.h include/opentape/record_payload.h \
+		include/opentape/native_scan.h include/opentape/volume_format.h dos.mk
 	$(MAKE) -f dos.mk OPEN386MAX=$(abspath $(OPEN386MAX)) \
 		OPENASPI=$(abspath $(OPENASPI)) MAXLANG=$(MAXLANG) \
 		OUT=$(abspath $(BUILD)/dos-obj) BINDIR=$(abspath $(BUILD)/dos) $(abspath $@)
@@ -94,7 +106,7 @@ $(HOSTBIN): tests/test_backend.c core/backend.c include/opentape/backend.h \
 	mkdir -p $(@D)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ tests/test_backend.c core/backend.c
 
-$(HOSTFORMATBIN): tests/test_volume_format.c core/volume_format.c \
+$(HOSTFORMATBIN): tests/test_volume_format.c core/volume_format.c core/wire.h \
 		include/opentape/volume_format.h $(OPENASPI)/include/openaspi/types.h
 	mkdir -p $(@D)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ tests/test_volume_format.c \
@@ -112,10 +124,18 @@ $(HOSTREADERBIN): tests/test_tape_reader.c core/tape_reader.c core/tape_probe.c 
 		core/tape_reader.c core/tape_probe.c
 
 $(HOSTNATIVEBIN): tests/test_native_scan.c core/native_scan.c core/volume_format.c \
+		core/record_payload.c core/wire.h include/opentape/record_payload.h \
 		include/opentape/native_scan.h include/opentape/volume_format.h
 	mkdir -p $(@D)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ tests/test_native_scan.c \
-		core/native_scan.c core/volume_format.c
+		core/native_scan.c core/volume_format.c core/record_payload.c
+
+$(HOSTPAYLOADBIN): tests/test_record_payload.c core/record_payload.c core/volume_format.c \
+		core/native_scan.c core/wire.h include/opentape/record_payload.h \
+		include/opentape/native_scan.h include/opentape/volume_format.h
+	mkdir -p $(@D)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ tests/test_record_payload.c \
+		core/record_payload.c core/volume_format.c core/native_scan.c
 
 $(BUILD)/win16/opentape.obj: frontends/win16/opentape.cpp \
 		include/opentape/backend.h include/opentape/messages.h $(WXLIB)

@@ -15,6 +15,11 @@ prefix of a label block, block/fragment CRC errors, record-count/length and
 sequence mismatches, duplicate/bad labels, invalid fragment offsets and counter
 overflow. A host-only test validates a full 65,535-byte block with outer guards.
 Native scanner tests also pass with both host sanitizers.
+Typed-payload tests cover little-endian reference bytes, session/file start/end
+roundtrips, DOS attributes and calendar dates, path length boundaries, truncated
+metadata, reserved fields and device/traversal names. The scanner must reject
+malicious typed payloads even when all block and fragment CRCs are valid, without
+committing partial state. Both host sanitizers also cover these payload tests.
 
 ## DOS status integration
 
@@ -91,6 +96,10 @@ All integration modes additionally run `NATTEST.EXE`, a DOS build of the same
 native-scanner positive/negative fixtures (excluding the large host-only boundary
 case). This test executable runs entirely in memory and is not distributed
 as part of the user application. Its success marker and DOS exit are required.
+They also run `PAYTEST.EXE`, a DOS build of the typed-payload tests, with a
+separate required success marker/exit. These in-memory tests do not write tapes
+or create restored files. English and German integration runs passed with both
+test programs on 2026-10-22.
 
 `make dos-native-smoke` selects a separate integration mode using the same
 environment and known non-native scratch fixture as the data-read test. After
