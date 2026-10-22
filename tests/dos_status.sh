@@ -74,6 +74,8 @@ lines=(
     'IF ERRORLEVEL 1 GOTO failed'
     'VERTEST > AUX'
     'IF ERRORLEVEL 1 GOTO failed'
+    'WRITEST > AUX'
+    'IF ERRORLEVEL 1 GOTO failed'
     'OPENTAPE --help > AUX'
     'IF ERRORLEVEL 1 GOTO failed'
     'OPENTAPE --status > AUX'
@@ -101,7 +103,8 @@ lines=(
 printf '%s\r\n' "${lines[@]}" > "$OUT/AUTOEXEC.BAT"
 mcopy -o -i "$OUT/boot.img" "$OUT/OPENTAPE.EXE" "$OUT/QEXIT.COM" \
     "$OUT/AUTOEXEC.BAT" "$ROOT/build/$MAXLANG/dos/NATTEST.EXE" \
-    "$ROOT/build/$MAXLANG/dos/PAYTEST.EXE" "$ROOT/build/$MAXLANG/dos/VERTEST.EXE" ::/
+    "$ROOT/build/$MAXLANG/dos/PAYTEST.EXE" "$ROOT/build/$MAXLANG/dos/VERTEST.EXE" \
+    "$ROOT/build/$MAXLANG/dos/WRITEST.EXE" ::/
 # A regular file with a device-like name must never be accepted as a tape.
 mcopy -o -i "$OUT/boot.img" "$ROOT/LICENSE" ::/NRMT3
 address=$(basename "$(readlink -f "/sys/class/scsi_generic/$(basename "$MHVTL_TAPE")/device")")
@@ -140,6 +143,7 @@ grep -q 'OpenTape DOS status passed' "$OUT/serial.log"
 grep -q 'OpenTape native framing tests passed' "$OUT/serial.log"
 grep -q 'OpenTape typed payload tests passed' "$OUT/serial.log"
 grep -q 'OpenTape archive state verification tests passed' "$OUT/serial.log"
+grep -q 'OpenTape archive writer tests passed' "$OUT/serial.log"
 grep -q "NRMT0 ASPI 00:0$guest_target:0$lun" "$OUT/serial.log"
 ! grep -q 'FAILED' "$OUT/serial.log"
 if test "$read_test" = 1; then

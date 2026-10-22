@@ -106,6 +106,9 @@ static void test_volume_label(void)
     assert(memcmp(decoded.volume_uuid, source.volume_uuid, 16u) == 0);
     assert(memcmp(decoded.volume_set_uuid, source.volume_set_uuid, 16u) == 0);
     assert(memcmp(decoded.volume_name, source.volume_name, 32u) == 0);
+    source.volume_name[31] = 'X';
+    assert(ot_volume_label_encode(encoded, &source) == OT_FORMAT_OK);
+    assert(encoded[87] == 0u);          /* No stale bytes after the name's NUL. */
 
     encoded[0] = 'X';
     assert(ot_volume_label_decode(&decoded, encoded) == OT_FORMAT_BAD_MAGIC);

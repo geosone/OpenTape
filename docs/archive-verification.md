@@ -47,7 +47,8 @@ incomplete under `--verify`, even though `--scan` may accept its framing.
 
 This is not a whole-volume or restore qualification. Multi-filemark scanning,
 cross-volume continuation, catalogue rebuild, damaged-record recovery, path
-collision/destination policy and extraction remain pending. A native writer
-and positive native-tape end-to-end test are also still pending. Passing checks
-cannot establish that the source selection was complete, that an external
+collision/destination policy and extraction remain pending. The shared writer
+core generates session blocks into a sink, but a device-writing backup command
+and positive native-tape end-to-end test remain pending. Passing checks cannot
+establish that the source selection was complete, that an external
 catalogue is correct, or that an actual restore will succeed.

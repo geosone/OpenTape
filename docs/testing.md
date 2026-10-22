@@ -26,6 +26,11 @@ wrong IDs/times, premature endings, gaps/duplicate fragments, bad totals,
 unsupported records and whole-block rollback. Counter overflow/carry cases
 inject boundary state; they do not claim multi-gigabyte tape qualification.
 The same state tests pass with both host sanitizers.
+Writer tests use a memory sink and then feed the captured physical blocks into
+a separate verifier instance. They cover known whole-file CRCs, empty files,
+directories, multiple sessions, scratch-buffer aliasing, short/error/invalid-count
+writes, delayed finalization errors and rejected reentrancy. A host-only guarded
+test emits a 65,535-byte block; the host writer tests also pass with both sanitizers.
 
 ## DOS status integration
 
@@ -109,6 +114,11 @@ test programs on 2026-10-22.
 `VERTEST.EXE` now runs the archive-state fixtures under DOS as well, including
 positive closed sessions and deliberately incomplete/corrupt sequences. Its
 success marker and DOS exit are separately required. English/German runs passed.
+`WRITEST.EXE` additionally runs the memory-sink writer/readback fixtures under
+DOS, excluding the host-only maximum-block allocation. Its own marker and DOS
+exit are required. No writer test is connected to the tape device: the integration
+harness still only performs its existing explicit rewind and read/status probes.
+Both English/German DOS runs passed on 2026-10-22 with the memory writer enabled.
 
 `make dos-native-smoke` selects a separate integration mode using the same
 environment and known non-native scratch fixture as the data-read test. After

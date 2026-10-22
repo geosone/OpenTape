@@ -33,7 +33,10 @@ complete backup verification and restore remain later steps.
 `OPENTAPE --verify` additionally checks sequential file/session ordering,
 whole-file CRCs and completion totals. It verifies only the bounded prefix
 through the first filemark, not a complete volume or restore. See
-[verification limits](docs/archive-verification.md). The actual writer remains pending.
+[verification limits](docs/archive-verification.md). The shared native writer
+now generates and validates session blocks through a sink interface; DOS device
+writing, source-file traversal and a backup command remain pending. See
+[writer scope](docs/archive-writer.md).
 
 The DOS interface directly uses Open386MAX's QUILIB.  No private window,
 dialog, keyboard, mouse, or colour implementation is kept in this repository.

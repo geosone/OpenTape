@@ -55,8 +55,9 @@ Unknown record types can be skipped using the stored fragment size.
 
 This document freezes the common framing, volume label, and the version-1
 DOS file/session payloads below. Volume-end and catalogue-checkpoint payloads
-remain unfrozen. No native backup writer or restore implementation exists yet;
-framing/codec test data must not be mistaken for completed backups.
+remain unfrozen. The shared writer core emits session blocks to a sink, but no
+device-writing backup command or restore implementation exists yet; memory
+roundtrips and framing/codec test data are not completed backups.
 
 ## Volume label payload
 
@@ -131,7 +132,8 @@ Exit codes are `0` valid framing through the first filemark, `1` bad arguments,
 Mandatory fixed-block transports are rejected before data reads: reassembly
 of serialized logical blocks from physical fixed units is not implemented yet.
 The raw `--read-test` diagnostic remains available independently of this format
-restriction. The native writer and damaged-record recovery are still pending.
+restriction. Device writing and damaged-record recovery are still pending;
+the [writer core](archive-writer.md) currently emits only session prefixes to a sink.
 
 ## File and session payloads, version 1
 

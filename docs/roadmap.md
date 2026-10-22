@@ -12,7 +12,8 @@
    backup, restore and verify without a TUI.
    Native framing/label scanning and file/session payload codecs are implemented.
    Sequential ordering/completion checks and whole-file CRC verification are
-   implemented. Recovery, writing, catalogue rebuild and restore remain pending.
+   implemented. The native writer core and memory-sink roundtrips are implemented;
+   device output, source traversal, recovery, catalogue rebuild and restore remain pending.
 6. Add partition capability probing and standard LTFS for supported LTO and
    IBM enterprise generations; add TAR import/export separately.
 7. Build the 80x25 DOS screens and persistent catalogue on Open386MAX QUILIB.

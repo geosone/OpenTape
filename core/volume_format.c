@@ -65,7 +65,7 @@ int ot_block_encode(oa_u8 *block, oa_u16 block_capacity,
     ot_put_u32(block + 28, ot_crc32(payload, payload_size));
     ot_put_u32(block + 32, ot_crc32(block, 32u));
     if (payload_size != 0u) {
-        memcpy(block + OT_BLOCK_HEADER_SIZE, payload, payload_size);
+        memmove(block + OT_BLOCK_HEADER_SIZE, payload, payload_size);
     }
     return OT_FORMAT_OK;
 }
@@ -146,6 +146,7 @@ int ot_record_header_decode(struct ot_record_header *header,
 int ot_volume_label_encode(oa_u8 out[OT_VOLUME_LABEL_SIZE],
                            const struct ot_volume_label *label)
 {
+    unsigned i;
     if (out == 0 || label == 0) {
         return OT_FORMAT_BAD_ARGUMENT;
     }
@@ -163,7 +164,8 @@ int ot_volume_label_encode(oa_u8 out[OT_VOLUME_LABEL_SIZE],
     ot_put_u32(out + 20, label->created_utc);
     memcpy(out + 24, label->volume_uuid, 16u);
     memcpy(out + 40, label->volume_set_uuid, 16u);
-    memcpy(out + 56, label->volume_name, 32u);
+    for (i = 0u; i < 32u && label->volume_name[i] != 0; ++i)
+        out[56u + i] = (oa_u8)label->volume_name[i];
     return OT_FORMAT_OK;
 }
 
