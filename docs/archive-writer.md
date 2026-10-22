@@ -27,12 +27,12 @@ There is no implicit traversal, allocation, seek, rewind, confirmation prompt
 or retry. The buffer must hold at least a complete label block (144 bytes).
 Data chunks are nonempty and cannot exceed the remaining file size or buffer
 capacity minus the 56-byte framing overhead. The caller chooses chunking;
-Long-path metadata can require 331 bytes including framing; buffers too small
-for a particular record are rejected without truncation or output.
 the writer never silently splits or replays a physical write. In-place source
 data in the scratch buffer is supported via overlap-safe moves. The block
 codec supports payloads already in their final position. Label encoding
 canonicalizes zero padding after the first name NUL.
+Long-path metadata can require 331 bytes including framing; buffers too small
+for a particular record are rejected without truncation or output.
 
 Before a sink call, the encoded block must pass framing, payload and state
 verification. Invalid caller input causes no output and does not poison a
