@@ -2,10 +2,14 @@
 
 `make MAXLANG=US check` and `make MAXLANG=GR check` build the DOS and Win16
 frontends and run host tests for backend selection, the native-format codec
-and read-only tape probing. Probe fixtures cover modern/legacy status,
+and read-only tape probing/reading. Probe fixtures cover modern/legacy status,
 normalization, invalid/rewinding names, missing devices, ordinary files,
 guard corruption, detected incompatible legacy layouts and cleanup/error
 precedence. No host unit test accesses a tape.
+Reader tests cover raw-mode setup, short data, filemarks and continuation,
+fixed-block alignment, invalid counts, failed-state/no-retry behavior,
+diagnostic failure precedence and cleanup. They also pass with AddressSanitizer
+and UndefinedBehaviorSanitizer on the host.
 
 ## DOS status integration
 
@@ -46,3 +50,32 @@ The English and German DOS status tests passed on 2026-10-22 with the installed
 unmodified QEMU 10.2.3, Tekram ASPI 1.60 and mhVTL's IBM ULT3580-TD8. Legacy
 fallback is host-fixture tested, not yet qualified with the historical driver.
 The Windows frontend is build-tested only; it does not use this DOS backend.
+
+## DOS data-read integration
+
+`make dos-read-smoke` extends the same integration harness with a bounded data
+read. It requires the known final buffered-roundtrip layout written by the
+current OpenASPI `dos-mhvtl-roundtrip` test on the approved disposable virtual
+cartridge. That layout is three 1024-byte physical records containing 2,500
+patterned bytes and 572 zero padding bytes, followed by filemarks. The read
+test does not create or overwrite this fixture.
+
+Use the same environment as above, but additionally select
+`QEMU_BIN=/path/to/patched/qemu-system-i386` and call `make MAXLANG=US dos-read-smoke`
+(repeat with `MAXLANG=GR`). The tested QEMU 10.2.3 filemark workaround is
+described in OpenASPI's setup guide. Installed unmodified QEMU is suitable for
+status only, not this filemark test.
+
+The harness revalidates the virtual cartridge and explicitly rewinds it with
+host `sg_raw` before booting; this moves the tape but writes no media data.
+Only the read-test mode enables this motion. The application itself has no
+rewind in `--read-test`. Wrong/buffered names and regular files must be rejected
+before reading. Acceptance requires three 1024-byte records with CRC32 values
+`227BE3D1`, `76A5CF1D`, `4D13C3E7`, then a filemark and a checked DOS exit.
+These expected values come from the known transport fixture, not an OpenTape
+backup. Do not interpret them as native-format compatibility or restore tests.
+
+English and German read tests passed on 2026-10-22 through Tekram 1.60 and
+mhVTL with the local QEMU patch. Logs are under `build/US/dos-read/` and
+`build/GR/dos-read/`. The final tape position is after the first filemark;
+no automatic cleanup rewind is performed. No physical tapes were tested.

@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include <commfunc.h>
@@ -12,11 +13,14 @@
 #include "opentape/backend.h"
 #include "opentape/messages.h"
 #include "opentape/tape_probe.h"
+#include "opentape/tape_reader.h"
+#include "opentape/volume_format.h"
 
 static void usage(void)
 {
     puts(OT_MSG_VERSION);
     puts(OT_MSG_USAGE);
+    puts(OT_MSG_READ_USAGE);
     puts(OT_MSG_NOT_IMPLEMENTED);
 }
 
@@ -101,10 +105,76 @@ static int print_tape_status(const char *name)
     return 0;
 }
 
+static int read_tape_test(const char *name)
+{
+    struct ot_tape_reader reader;
+    unsigned char *buffer;
+    unsigned count, bytes, capacity, block_size;
+    unsigned long total;
+    int rc, exit_code;
+
+    buffer = malloc(OT_BLOCK_RECOMMENDED_SIZE);
+    if (buffer == 0) {
+        fputs(OT_MSG_READ_MEMORY, stderr);
+        return 2;
+    }
+    memset(&reader, 0, sizeof(reader));
+    rc = ot_reader_open(&reader, ot_dos_reader_ops(), name);
+    if (rc != OT_PROBE_OK) {
+        fprintf(stderr, OT_MSG_PROBE_ERROR, name, rc, reader.dos_error);
+        free(buffer);
+        return 2;
+    }
+    capacity = OT_BLOCK_RECOMMENDED_SIZE;
+    block_size = reader.status.tape.fixed_block_size;
+    if ((reader.status.tape.device_parameters & OA_MT_PARAM_FIXED_BLOCK) != 0u)
+        capacity = (capacity / block_size) * block_size;
+    puts(OT_MSG_READ_WARNING);
+    total = 0ul;
+    exit_code = 3;
+    for (count = 0u; count < 16u; ++count) {
+        rc = ot_reader_read(&reader, buffer, capacity, &bytes);
+        if (rc == OT_READ_FILEMARK) {
+            printf(OT_MSG_READ_EOF, count, total);
+            exit_code = 0;
+            break;
+        }
+        if (rc != OT_READ_BLOCK) {
+            fprintf(stderr, OT_MSG_PROBE_ERROR, name, rc, reader.dos_error);
+            printf(OT_MSG_PROBE_SCSI, (unsigned)reader.status.tape.last_scsi_status,
+                   (unsigned)reader.status.tape.last_sense_key,
+                   (unsigned)reader.status.tape.last_scsi_opcode,
+                   (unsigned)reader.status.tape.residual_bytes);
+            exit_code = 2;
+            break;
+        }
+        printf(OT_MSG_READ_BLOCK, count, bytes,
+               (unsigned long)ot_crc32(buffer, (oa_u16)bytes));
+        total += bytes;
+    }
+    if (exit_code == 3) puts(OT_MSG_READ_LIMIT);
+    if (ot_reader_close(&reader) != OT_PROBE_OK) {
+        fprintf(stderr, OT_MSG_PROBE_ERROR, name, OT_PROBE_CLOSE_FAILED,
+                reader.dos_error);
+        exit_code = 2;
+    }
+    free(buffer);
+    return exit_code;
+}
+
 int main(int argc, char **argv)
 {
     enum ot_backend_kind selected;
 
+    if (argc > 1 && strcmp(argv[1], "--read-test") == 0) {
+        if (argc == 2) return read_tape_test("NRMT0");
+        if (argc == 4 && strcmp(argv[2], "--device") == 0 &&
+            ot_probe_name_valid(argv[3]) &&
+            (argv[3][1] == 'R' || argv[3][1] == 'r'))
+            return read_tape_test(argv[3]);
+        usage();
+        return 1;
+    }
     if (argc > 1 && (strcmp(argv[1], "--status") == 0 ||
                      strcmp(argv[1], "/STATUS") == 0)) {
         if (argc == 2) return print_tape_status("NRMT0");

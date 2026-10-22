@@ -17,6 +17,7 @@ WINBIN  := $(BUILD)/win16/OTAPEWIN.EXE
 HOSTBIN := $(BUILD)/host/test_backend
 HOSTFORMATBIN := $(BUILD)/host/test_volume_format
 HOSTPROBEBIN := $(BUILD)/host/test_tape_probe
+HOSTREADERBIN := $(BUILD)/host/test_tape_reader
 DISTDIR := $(BUILD)/dist
 INSTALL_CFG := installer/INSTALL.$(MAXLANG)
 INSTALL_README := installer/README.$(MAXLANG)
@@ -38,19 +39,23 @@ CPPFLAGS += -Iinclude
 CPPFLAGS += -I$(OPENASPI)/include
 CPPFLAGS += -DLANG_$(MAXLANG)
 
-.PHONY: all win16 test check dos-status-smoke languages dist clean
+.PHONY: all win16 test check dos-status-smoke dos-read-smoke languages dist clean
 
-all: $(DOSBIN) $(HOSTBIN) $(HOSTFORMATBIN) $(HOSTPROBEBIN)
+all: $(DOSBIN) $(HOSTBIN) $(HOSTFORMATBIN) $(HOSTPROBEBIN) $(HOSTREADERBIN)
 
-test: $(HOSTBIN) $(HOSTFORMATBIN) $(HOSTPROBEBIN)
+test: $(HOSTBIN) $(HOSTFORMATBIN) $(HOSTPROBEBIN) $(HOSTREADERBIN)
 	$(HOSTBIN)
 	$(HOSTFORMATBIN)
 	$(HOSTPROBEBIN)
+	$(HOSTREADERBIN)
 
 check: all test win16
 
 dos-status-smoke: all
 	MAXLANG=$(MAXLANG) OPENASPI=$(abspath $(OPENASPI)) bash tests/dos_status.sh
+
+dos-read-smoke: all
+	OPENTAPE_READ_TEST=1 MAXLANG=$(MAXLANG) OPENASPI=$(abspath $(OPENASPI)) bash tests/dos_status.sh
 
 win16: $(WINBIN)
 
@@ -62,6 +67,7 @@ $(DOSBIN): src/main.c core/backend.c include/opentape/backend.h \
 		include/opentape/messages.h include/opentape/tape_probe.h \
 		core/tape_probe.c backends/legacy_tape/legacy_dos.c \
 		core/volume_format.c include/opentape/volume_format.h \
+		core/tape_reader.c include/opentape/tape_reader.h \
 		$(OPENASPI)/include/openaspi/aspitape.h dos.mk
 	$(MAKE) -f dos.mk OPEN386MAX=$(abspath $(OPEN386MAX)) \
 		OPENASPI=$(abspath $(OPENASPI)) \
@@ -84,6 +90,12 @@ $(HOSTPROBEBIN): tests/test_tape_probe.c core/tape_probe.c \
 		include/opentape/tape_probe.h $(OPENASPI)/include/openaspi/aspitape.h
 	mkdir -p $(@D)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ tests/test_tape_probe.c core/tape_probe.c
+
+$(HOSTREADERBIN): tests/test_tape_reader.c core/tape_reader.c core/tape_probe.c \
+		include/opentape/tape_reader.h include/opentape/tape_probe.h
+	mkdir -p $(@D)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ tests/test_tape_reader.c \
+		core/tape_reader.c core/tape_probe.c
 
 $(BUILD)/win16/opentape.obj: frontends/win16/opentape.cpp \
 		include/opentape/backend.h include/opentape/messages.h $(WXLIB)

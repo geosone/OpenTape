@@ -4,7 +4,9 @@
    changing media (implemented, including the OpenASPI 16-byte extension;
    automatic enumeration remains).
 2. Implement rewind, status, load/unload and spacing in a small CLI tool.
-3. Add variable- and fixed-block streaming reads with filemark handling.
+3. [partial] Raw read sessions and bounded `--read-test` with short-record,
+   filemark and fixed-block alignment handling are implemented. DOS/mhVTL
+   variable records are tested; real fixed-block devices remain unqualified.
 4. Add write support behind explicit write-protection and confirmation checks.
 5. Implement native volume label, block/record streaming, catalogue rebuild,
    backup, restore and verify without a TUI.

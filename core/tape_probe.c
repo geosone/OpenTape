@@ -35,10 +35,10 @@ static int guard_ok(const unsigned char *buffer, unsigned start)
     return 1;
 }
 
-int ot_tape_probe(const struct ot_probe_ops *ops, const char *name,
+int ot_tape_query(const struct ot_probe_ops *ops, unsigned handle,
                   struct ot_tape_status *status, unsigned *dos_error)
 {
-    unsigned handle, flags, error, close_error;
+    unsigned error;
     unsigned char buffer[20];
     struct oa_aspitape_mtget legacy;
     struct ot_tape_status result;
@@ -46,22 +46,11 @@ int ot_tape_probe(const struct ot_probe_ops *ops, const char *name,
 
     if (dos_error != 0) *dos_error = 0u;
     if (ops == 0 || status == 0 || dos_error == 0 ||
-        ops->open_readonly == 0 || ops->device_info == 0 ||
-        ops->status == 0 || ops->close == 0 || !ot_probe_name_valid(name))
+        ops->status == 0)
         return OT_PROBE_BAD_ARGUMENT;
-    error = ops->open_readonly(ops->context, name, &handle);
-    if (error != 0u) {
-        *dos_error = error;
-        return OT_PROBE_OPEN_FAILED;
-    }
     memset(&result, 0, sizeof(result));
     rc = OT_PROBE_OK;
-    error = ops->device_info(ops->context, handle, &flags);
-    if (error != 0u) {
-        rc = OT_PROBE_IOCTL_FAILED;
-    } else if ((flags & 0x80u) == 0u) {
-        rc = OT_PROBE_NOT_DEVICE;
-    } else {
+    {
         memset(buffer, 0xa5, sizeof(buffer));
         error = ops->status(ops->context, handle, OA_ASPITAPE_IOCTL_MTGET16,
                             buffer, 16u);
@@ -100,6 +89,32 @@ int ot_tape_probe(const struct ot_probe_ops *ops, const char *name,
             rc = OT_PROBE_IOCTL_FAILED;
         }
     }
+    *dos_error = error;
+    if (rc == OT_PROBE_OK) *status = result;
+    return rc;
+}
+
+int ot_tape_probe(const struct ot_probe_ops *ops, const char *name,
+                  struct ot_tape_status *status, unsigned *dos_error)
+{
+    unsigned handle, flags, error, close_error;
+    struct ot_tape_status result;
+    int rc;
+
+    if (dos_error != 0) *dos_error = 0u;
+    if (ops == 0 || status == 0 || dos_error == 0 ||
+        ops->open_readonly == 0 || ops->device_info == 0 ||
+        ops->status == 0 || ops->close == 0 || !ot_probe_name_valid(name))
+        return OT_PROBE_BAD_ARGUMENT;
+    error = ops->open_readonly(ops->context, name, &handle);
+    if (error != 0u) {
+        *dos_error = error;
+        return OT_PROBE_OPEN_FAILED;
+    }
+    error = ops->device_info(ops->context, handle, &flags);
+    if (error != 0u) rc = OT_PROBE_IOCTL_FAILED;
+    else if ((flags & 0x80u) == 0u) rc = OT_PROBE_NOT_DEVICE;
+    else rc = ot_tape_query(ops, handle, &result, &error);
     close_error = ops->close(ops->context, handle);
     if (rc == OT_PROBE_OK && close_error != 0u) {
         rc = OT_PROBE_CLOSE_FAILED;

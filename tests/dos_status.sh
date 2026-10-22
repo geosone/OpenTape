@@ -5,6 +5,12 @@ ROOT=$(cd "$(dirname "$0")/.." && pwd)
 OPENASPI=${OPENASPI:-$ROOT/deps/OpenASPI}
 MAXLANG=${MAXLANG:-US}
 OUT="$ROOT/build/$MAXLANG/dos-status"
+read_test=${OPENTAPE_READ_TEST:-0}
+case "$read_test" in
+    0) ;;
+    1) OUT="$ROOT/build/$MAXLANG/dos-read" ;;
+    *) echo 'OPENTAPE_READ_TEST must be 0 or 1' >&2; exit 1 ;;
+esac
 QEMU_BIN=${QEMU_BIN:-qemu-system-i386}
 JWASM=${JWASM:-$ROOT/deps/Open386MAX/linux/bin/jwasm}
 : "${DOS_BOOT_IMAGE:?Select a prepared OpenASPI dc390/mhVTL boot.img with DELAY.SYS}"
@@ -25,6 +31,20 @@ cp "$DOS_BOOT_IMAGE" "$OUT/boot.img"
 cp "$ROOT/build/$MAXLANG/dos/OPENTAPE.EXE" "$OUT/OPENTAPE.EXE"
 "$JWASM" -q -bin -0 -W4 -WX \
     -Fo="$OUT/QEXIT.COM" "$OPENASPI/tests/qexit.asm"
+read_lines=()
+if test "$read_test" = 1; then
+    read_lines=(
+        'OPENTAPE --read-test --device NMT0 > AUX'
+        'IF ERRORLEVEL 2 GOTO failed'
+        'IF NOT ERRORLEVEL 1 GOTO failed'
+        'OPENTAPE --read-test --device NRMT3 > AUX'
+        'IF ERRORLEVEL 3 GOTO failed'
+        'IF NOT ERRORLEVEL 2 GOTO failed'
+        'OPENTAPE --read-test > AUX'
+        'IF ERRORLEVEL 1 GOTO failed'
+        'ECHO OpenTape DOS read passed > AUX'
+    )
+fi
 lines=(
     '@ECHO OFF'
     'OPENTAPE --help > AUX'
@@ -42,6 +62,7 @@ lines=(
     'OPENTAPE --status --device NRMT3 > AUX'
     'IF ERRORLEVEL 3 GOTO failed'
     'IF NOT ERRORLEVEL 2 GOTO failed'
+    "${read_lines[@]}"
     'ECHO OpenTape DOS status passed > AUX'
     'GOTO finished'
     ':failed'
@@ -58,6 +79,11 @@ address=$(basename "$(readlink -f "/sys/class/scsi_generic/$(basename "$MHVTL_TA
 IFS=: read -r host channel target lun <<< "$address"
 guest_target=$((10#$target % 8))
 verify_tape
+if test "$read_test" = 1; then
+    # Explicitly gated, host-side rewind of the approved virtual fixture only.
+    # The application itself never rewinds. No media data is written here.
+    sg_raw "$MHVTL_TAPE" 01 00 00 00 00 00 > "$OUT/rewind.log" 2>&1
+fi
 : > "$OUT/serial.log"
 mkfifo "$OUT/monitor.fifo"
 {
@@ -84,5 +110,12 @@ tr -d '\r' < "$OUT/serial.log"
 grep -q 'OpenTape DOS status passed' "$OUT/serial.log"
 grep -q "NRMT0 ASPI 00:0$guest_target:0$lun" "$OUT/serial.log"
 ! grep -q 'FAILED' "$OUT/serial.log"
+if test "$read_test" = 1; then
+    grep -q 'OpenTape DOS read passed' "$OUT/serial.log"
+    grep -Eq '(Filemark|Dateimarke): 3 (blocks|Bloecke), 3072 (bytes|Byte)' "$OUT/serial.log"
+    grep -q 'Block 0: 1024 .*CRC32=227BE3D1' "$OUT/serial.log"
+    grep -q 'Block 1: 1024 .*CRC32=76A5CF1D' "$OUT/serial.log"
+    grep -q 'Block 2: 1024 .*CRC32=4D13C3E7' "$OUT/serial.log"
+fi
 mtype -i "$OUT/boot.img" ::/NRMT3 | cmp - "$ROOT/LICENSE"
-echo "OpenTape $MAXLANG read-only DOS status smoke passed"
+echo "OpenTape $MAXLANG read-only DOS status smoke passed (data read: $read_test)"

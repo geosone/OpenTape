@@ -30,6 +30,8 @@ struct ot_tape_status {
 
 /* Only no-rewind aliases, including -tX and -$ names, are accepted. */
 int ot_probe_name_valid(const char *name);
+int ot_tape_query(const struct ot_probe_ops *ops, unsigned handle,
+                  struct ot_tape_status *status, unsigned *dos_error);
 int ot_tape_probe(const struct ot_probe_ops *ops, const char *name,
                   struct ot_tape_status *status, unsigned *dos_error);
 
