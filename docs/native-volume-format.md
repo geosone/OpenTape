@@ -7,8 +7,13 @@ values. On-tape data never contains compiler-packed C structures.
 The first logical block contains a volume-label record. Backup sessions contain
 start, file metadata/data/end and session-end records. A tape filemark closes a
 completed session. The last writable session ends with a volume-end record.
-Each logical block is normally one variable-length physical tape record; fixed-
-block transports use the same serialized bytes in 32 KiB units.
+Each logical block is normally one variable-length physical tape record. The
+native fixed-block transport instead uses an explicitly selected physical block
+size: one logical block spans whole physical blocks, with zero padding only
+after its declared length. The next logical block starts at a physical boundary.
+Header size/version, stored logical length and CRC coverage exclude padding;
+no 32-KiB physical block size is assumed. Read with the selected fixed mode/size,
+not the variable-record adapter. See [native fixed archives](native-archive.md#fixed-block-archives).
 
 ## Block header
 
@@ -55,9 +60,9 @@ Unknown record types can be skipped using the stored fragment size.
 
 This document freezes the common framing, volume label, and the version-1
 DOS file/session payloads below. Volume-end and catalogue-checkpoint payloads
-remain unfrozen. The shared writer core emits session blocks to a sink, but no
-device-writing backup command or restore implementation exists yet; memory
-roundtrips and framing/codec test data are not completed backups.
+remain unfrozen. The shared writer emits session blocks to the DOS sink;
+experimental file/tree backup and [new-root restore](restore.md) are implemented.
+Memory roundtrips alone are not completed backups or restore qualification.
 
 ## Volume label payload
 
@@ -129,11 +134,16 @@ inject screen commands through the displayed name.
 
 Exit codes are `0` valid framing through the first filemark, `1` bad arguments,
 `2` transport/format error, `3` record limit reached without confirming EOF.
-Mandatory fixed-block transports are rejected before data reads: reassembly
-of serialized logical blocks from physical fixed units is not implemented yet.
+The ordinary legacy archive path rejects mandatory fixed-block transports.
+Explicit `--native --fixed-block N` reassembles complete logical blocks with
+validated length/CRCs and zero padding; the scan limit counts logical blocks,
+not physical I/O calls.
 The raw `--read-test` diagnostic remains available independently of this format
-restriction. Device writing and damaged-record recovery are still pending;
-the [writer core](archive-writer.md) currently emits only session prefixes to a sink.
+restriction. A guarded virtual-tape diagnostic now connects the
+[writer core](archive-writer.md) to the DOS output sink; the experimental
+[single-file](single-file-backup.md) and bounded [tree](tree-backup.md) commands
+now use it too. Unrestricted selection and damaged-record recovery remain pending. The writer emits closed
+session prefixes, not VOLUME_END or catalogue checkpoint records.
 
 ## File and session payloads, version 1
 
@@ -189,8 +199,9 @@ rejected. Device basenames CON, PRN, AUX, NUL, CLOCK$, CONIN$, CONOUT$, COM0..9
 and LPT0..9 are rejected case-insensitively, even with an extension.
 Long names/non-ASCII paths need a future payload version; the initial DOS
 writer will not silently rename or truncate them. Lexical validation is not
-a restore sandbox: destination collisions, case folding and filesystem links
-still need checks in the future restore implementation.
+a restore sandbox. The initial [restore policy](restore.md) adds a new root,
+case-folded collision checks, exclusive staging and non-replacing publication;
+hostile filesystem redirects/concurrent manipulation remain outside its scope.
 
 Metadata assigns a nonzero object ID unique within the session. Directory
 metadata has no FILE_DATA or FILE_END. Empty regular files may have no data

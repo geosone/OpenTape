@@ -26,6 +26,15 @@ struct ot_tape_reader {
     unsigned failed;
     unsigned dos_error;
     struct ot_tape_status status;
+    /* Archive-level backend hooks; legacy operations leave these zero. */
+    void *backend_context;
+    int (*backend_read)(struct ot_tape_reader *, void *, unsigned, unsigned *);
+    int (*backend_close)(struct ot_tape_reader *);
+    unsigned pending_filemark;
+    /* Optional caller-owned workspace for archive backend framing. */
+    oa_u8 *backend_buffer;
+    unsigned backend_capacity;
+    int backend_result;
 };
 
 int ot_reader_open(struct ot_tape_reader *reader,

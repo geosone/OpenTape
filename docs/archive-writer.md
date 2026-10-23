@@ -3,7 +3,9 @@
 `core/archive_writer.c` generates the sequential profile consumed by the
 archive verifier: volume label, session start, directory/file metadata, file
 data, file end and session end. It is a reusable application-core API, not yet
-a DOS tape-writing backend or user-facing backup command.
+a file-selection command. The [single-file CLI](single-file-backup.md) now uses
+this core. A separate [DOS output transport](tape-output.md)
+now supplies a sink adapter with a guarded virtual-tape write/readback fixture.
 
 The caller supplies a separate scratch buffer and an output sink. Each logical
 record is currently encoded as one variable-length physical block, with one
@@ -52,16 +54,19 @@ reentrant API calls are rejected.
 SESSION_END is submitted only after all regular files close consistently.
 Then `finish_session` must flush/finalize the sink and report delayed failures.
 An error here leaves completion failed even if SESSION_END bytes were accepted.
-For a future ASPITAPE backend, successful DOS close alone is insufficient:
+For the ASPITAPE backend, successful DOS close alone is insufficient:
 driver status must also be checked for delayed filemark/finalization errors.
 That backend owns physical marks/handle lifetime and must avoid duplicate
-termination. No such device sink is connected yet.
+termination. The new transport implements this contract with injected-operation
+tests, a separate DOS/mhVTL diagnostic and the initial single-file CLI.
 
 The completion query means a closed, sink-acknowledged session prefix. It is
 not proof of physical durability or readback. VOLUME_END and catalogue checkpoint
-payloads are not emitted; complete-volume closure, source filesystem traversal,
-changed-source handling, media write-protect checks and explicit overwrite
-authorization still belong to subsequent implementation steps. Never turn a
+payloads are not emitted; complete-volume closure, unrestricted selection,
+atomic changed-source handling and general media identity/protection policy
+remain pending. Single-file streaming now performs size/time/attribute checks
+and requires explicit overwrite authorization; bounded tree planning reuses
+the same file streamer. Never turn a
 failed writer into an automatic retry by zeroing its state: media position must
 be explicitly recovered first.
 

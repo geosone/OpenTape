@@ -53,6 +53,7 @@ int ot_reader_read(struct ot_tape_reader *r, void *buffer,
     if (r == 0 || !r->opened || buffer == 0 || accepted == 0 ||
         capacity < 2u || (oa_u32)capacity > 65535ul) return OT_READ_BAD_ARGUMENT;
     if (r->failed) return OT_READ_FAILED_STATE;
+    if (r->backend_read != 0) return r->backend_read(r, buffer, capacity, accepted);
     block_size = r->status.tape.fixed_block_size;
     if ((r->status.tape.device_parameters & OA_MT_PARAM_FIXED_BLOCK) != 0u &&
         capacity % block_size != 0u) return OT_READ_BAD_ARGUMENT;
@@ -75,6 +76,7 @@ int ot_reader_close(struct ot_tape_reader *r)
 {
     unsigned error;
     if (r == 0 || !r->opened) return OT_READ_BAD_ARGUMENT;
+    if (r->backend_close != 0) return r->backend_close(r);
     error = r->ops->probe.close(r->ops->probe.context, r->handle);
     r->opened = 0u;
     if (error != 0u) {

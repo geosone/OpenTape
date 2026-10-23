@@ -27,6 +27,15 @@ int ot_probe_name_valid(const char *name)
            name[letter + 2u] >= '0' && name[letter + 2u] <= '3';
 }
 
+int ot_probe_raw_name_valid(const char *name)
+{
+    unsigned size;
+    if (!ot_probe_name_valid(name)) return 0;
+    size = (unsigned)strlen(name);
+    if (name[size - 1u] == '$') --size;
+    return size == 5u && upper_ascii(name[1]) == 'R';
+}
+
 static int guard_ok(const unsigned char *buffer, unsigned start)
 {
     unsigned i;
@@ -122,5 +131,82 @@ int ot_tape_probe(const struct ot_probe_ops *ops, const char *name,
     }
     *dos_error = error;
     if (rc == OT_PROBE_OK) *status = result;
+    return rc;
+}
+
+static int rewind_mode_valid(const struct ot_tape_status *status)
+{
+    unsigned state = status->tape.current_state;
+    return (state & 3u) == OA_MT_STATE_UNBUFFERED &&
+        (state & (OA_MT_STATE_REWIND_CLOSE | OA_MT_STATE_WRITTEN |
+                  OA_MT16_STATE_WRITE_ERROR)) == 0u;
+}
+
+int ot_tape_enumerate(const struct ot_probe_ops *ops, char letter, unsigned dollar,
+                       ot_device_visitor visitor, void *context, struct ot_device_summary *summary)
+{
+    struct ot_device_entry entry;
+    unsigned i;
+    if (summary != 0) memset(summary, 0, sizeof(*summary));
+    letter = upper_ascii(letter);
+    if (ops == 0 || summary == 0 || visitor == 0 ||
+        ops->open_readonly == 0 || ops->device_info == 0 || ops->status == 0 || ops->close == 0 ||
+        letter < 'A' || letter > 'Z' || dollar > 1u) return OT_PROBE_BAD_ARGUMENT;
+    for (i = 0u; i < 4u; ++i) {
+        memset(&entry, 0, sizeof(entry));
+        strcpy(entry.name, "NRMT0"); entry.name[2] = letter; entry.name[4] = (char)('0' + i);
+        if (dollar) { entry.name[5] = '$'; entry.name[6] = 0; }
+        entry.result = ot_tape_probe(ops, entry.name, &entry.status, &entry.dos_error);
+        ++summary->examined;
+        if (entry.result == OT_PROBE_OK) { entry.kind = OT_DEVICE_FOUND; ++summary->found; }
+        else if (entry.result == OT_PROBE_OPEN_FAILED && entry.dos_error == 2u) {
+            entry.kind = OT_DEVICE_MISSING; ++summary->missing;
+        } else if (entry.result == OT_PROBE_NOT_DEVICE) {
+            entry.kind = OT_DEVICE_REJECTED; ++summary->rejected;
+        } else { entry.kind = OT_DEVICE_ERROR; ++summary->errors; }
+        if (visitor(context, &entry) != 0) return OT_ENUM_VISITOR;
+    }
+    if (summary->errors != 0u || summary->rejected != 0u) return OT_ENUM_PARTIAL;
+    return summary->found != 0u ? OT_PROBE_OK : OT_ENUM_EMPTY;
+}
+
+int ot_tape_rewind(const struct ot_rewind_ops *ops, const char *name,
+                   struct ot_tape_status *status, unsigned *dos_error)
+{
+    struct oa_aspitape_mtop request;
+    unsigned handle, flags, error, close_error;
+    int rc;
+    if (dos_error != 0) *dos_error = 0u;
+    if (ops == 0 || status == 0 || dos_error == 0 ||
+        ops->probe.open_readonly == 0 || ops->probe.device_info == 0 ||
+        ops->probe.status == 0 || ops->probe.close == 0 || ops->rewind == 0 ||
+        !ot_probe_raw_name_valid(name))
+        return OT_PROBE_BAD_ARGUMENT;
+    error = ops->probe.open_readonly(ops->probe.context, name, &handle);
+    if (error != 0u) { *dos_error = error; return OT_PROBE_OPEN_FAILED; }
+    error = ops->probe.device_info(ops->probe.context, handle, &flags);
+    rc = OT_PROBE_IOCTL_FAILED;
+    if (error == 0u) {
+        if ((flags & 0x80u) == 0u) rc = OT_PROBE_NOT_DEVICE;
+        else rc = ot_tape_query(&ops->probe, handle, status, &error);
+    }
+    if (rc == 0 && !rewind_mode_valid(status)) rc = OT_REWIND_BAD_STATE;
+    if (rc == 0) {
+        request.operation = OA_MTREW; request.count = 1ul;
+        error = ops->rewind(ops->probe.context, handle, &request);
+        if (error != 0u) rc = OT_REWIND_IO;
+        else {
+            rc = ot_tape_query(&ops->probe, handle, status, &error);
+            if (rc == 0 && (!rewind_mode_valid(status) ||
+                (status->tape.current_state & OA_MT16_STATE_REWINDING) != 0u ||
+                (status->extended && status->tape.driver_error != 0u) ||
+                status->tape.last_scsi_status != 0u ||
+                (status->tape.last_scsi_opcode & 0xffu) != 0x01u))
+                rc = OT_REWIND_BAD_STATE;
+        }
+    }
+    close_error = ops->probe.close(ops->probe.context, handle);
+    if (rc == 0 && close_error != 0u) { rc = OT_PROBE_CLOSE_FAILED; error = close_error; }
+    *dos_error = error;
     return rc;
 }
