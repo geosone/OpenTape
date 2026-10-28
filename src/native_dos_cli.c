@@ -4,6 +4,12 @@
 #include "opentape/tape_probe.h"
 #include "opentape/messages.h"
 
+/* Current CHECK CONDITION sense key 6: the drive reset or the medium changed.
+ * ASPITAP latches native FAILED until an explicit REWIND succeeds. */
+static int unit_attention(oa_u8 host,oa_u8 target,oa_u8 response,oa_u8 key)
+{
+    return host==0u && target==2u && (response==0x70u || response==0x72u) && key==6u;
+}
 /* Decimal-only unsigned parsing checks before multiplication. This accepts the
  * full LOCATE(10) address range without LONG overflow or opening a device. */
 static int unsigned_number(const char *s,oa_u32 maximum,oa_u32 *out)
@@ -288,6 +294,9 @@ int ot_dos_native_command(int argc, char **argv)
             if (control.diagnostic_class != 0u)
                 printf(OT_MSG_NATIVE_DIAG, control.diagnostic_class, control.host_status,
                     control.target_status, control.sense_key, control.asc, control.ascq);
+            if (unit_attention(control.host_status, control.target_status,
+                               control.sense_response, control.sense_key))
+                puts(OT_MSG_NATIVE_ATTENTION);
         }
     }
     if (fflush(stdout) != 0 || ferror(stdout)) return 2;

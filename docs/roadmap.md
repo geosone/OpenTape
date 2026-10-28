@@ -17,6 +17,8 @@
    session uncertainty and legacy stream state. Long READ POSITION and
    LOCATE(16) now retain full 64-bit coordinates and independent filemark validity
    through checked DOS decimal conversion; old format-0 bindings remain available.
+   A current Unit Attention (drive reset/medium change) now latches native FAILED
+   in ASPITAP until an explicit REWIND; the CLI names the cause. No retries.
 3. [partial] Raw read sessions and bounded `--read-test` with short-record,
    filemark and fixed-block alignment handling are implemented. DOS/mhVTL
    variable records are tested; real fixed-block devices remain unqualified.

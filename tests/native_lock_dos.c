@@ -83,6 +83,20 @@ int main(int argc,char **argv)
     invalid();
     if(argc>1 && strcmp(argv[1],"eof")==0) {
         legacy_eof();
+    } else if(argc>1 && strcmp(argv[1],"attention")==0) {
+        /* A current UNIT ATTENTION latches native FAILED even for a
+         * non-moving command; only explicit REWIND clears it. */
+        CHECK(ot_dos_native_execute("NRMT0",12,&p,&error)==OT_NATIVE_COMMAND);
+        CHECK(p.completion_flags==1 && p.session_state==0x40 && p.scsi_opcode==0x1e);
+        CHECK(p.diagnostic_class==OT_TAPE_DIAG_TARGET && p.sense_key==6 && p.asc==0x29);
+        CHECK(p.sense_response==0x70 && p.target_status==2);
+        CHECK(ot_dos_native_probe("NRMT0",0,&info,&error)==0 && info.session_state==0x40);
+        CHECK(ot_dos_native_space("NRMT0",7,1,&p,&error)==OT_NATIVE_BUSY);
+        CHECK(ot_dos_native_writer_open(&writer,"NRMT0")!=0);
+        execute(0,0,0x13,0x40);
+        execute(1,0,0xb,0);
+        execute(13,0,3,0);
+        CHECK(ot_dos_native_probe("NRMT0",0,&info,&error)==0 && info.session_state==0);
     } else if(argc>1) {
         CHECK(argc==3);
         CHECK(ot_dos_native_execute("NRMT0",(oa_u16)atoi(argv[1]),&p,&error)==OT_NATIVE_COMMAND);

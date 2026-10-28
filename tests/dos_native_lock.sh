@@ -13,7 +13,7 @@ make -C "$OPENASPI" all > "$OUT/provider-build.log" 2>&1
 make -C "$ROOT" -f dos.mk OPENASPI="$OPENASPI" MAXLANG="$MAXLANG" \
     OUT="$OUT/obj-$MAXLANG" BINDIR="$OUT/bin-$MAXLANG" \
     "$OUT/bin-$MAXLANG/OPENTAPE.EXE" "$OUT/bin-$MAXLANG/NTLOCK.EXE" > "$OUT/build-$MAXLANG.log" 2>&1
-variants=(normal legacy eof lock-host lock-unsupported lock-deferred lock-contradict unlock-target unlock-busy unlock-mark)
+variants=(normal legacy eof lock-host lock-unsupported lock-deferred lock-contradict unlock-target unlock-busy unlock-mark lock-attention)
 if test "$#" -gt 0; then variants=("$@"); fi
 for variant in "${variants[@]}"; do
     run_dir="$OUT/$MAXLANG-$variant"
@@ -31,11 +31,13 @@ for variant in "${variants[@]}"; do
         unlock-target) defines+=(-DNATIVE_LOCK_FAULT=5); argument='13 2'; first='--native-unlock' ;;
         unlock-busy) defines+=(-DNATIVE_LOCK_FAULT=6); argument='13 2'; first='--native-unlock' ;;
         unlock-mark) defines+=(-DNATIVE_LOCK_FAULT=7); argument='13 2'; first='--native-unlock' ;;
+        lock-attention) defines+=(-DNATIVE_LOCK_FAULT=8); argument=attention ;;
         *) echo "Unknown removal fixture: $variant" >&2; exit 1 ;;
     esac
     writes=1
     if test -n "$argument"; then calls=4; cli_calls=4; writes=0; fi
     if test "$variant" = eof; then calls=3; cli_calls=9; fi
+    if test "$variant" = lock-attention; then calls=4; cli_calls=4; fi
     (cd "$OPENASPI" && build/tools/jwasm/jwasm -q -bin -0 -W4 -WX "${defines[@]}" \
         -Fo="$run_dir/MOCKASPI.SYS" tests/mockaspi.asm)
     nasm -f bin -o "$run_dir/QEXIT.COM" "$OPENASPI/../ahciaspi/tools/qexit.asm"
@@ -57,7 +59,14 @@ for variant in "${variants[@]}"; do
     done
     lines+=('OPENTAPE --native-lock --device NRMT3 > AUX'
         'IF ERRORLEVEL 3 GOTO FAILED' 'IF NOT ERRORLEVEL 2 GOTO FAILED')
-    if test -n "$argument" && test "$variant" != eof; then
+    if test "$variant" = lock-attention; then
+        # UNIT ATTENTION latches FAILED: status reports it until REWIND.
+        lines+=('OPENTAPE --native-lock > AUX' 'IF ERRORLEVEL 3 GOTO FAILED' 'IF NOT ERRORLEVEL 2 GOTO FAILED'
+            'OPENTAPE --native-status > AUX' 'IF ERRORLEVEL 3 GOTO FAILED' 'IF NOT ERRORLEVEL 2 GOTO FAILED')
+        for command in '--native-ready' '--native-rewind' '--native-status' '--native-unlock'; do
+            lines+=("OPENTAPE $command > AUX" 'IF ERRORLEVEL 1 GOTO FAILED')
+        done
+    elif test -n "$argument" && test "$variant" != eof; then
         lines+=("OPENTAPE $first > AUX" 'IF ERRORLEVEL 3 GOTO FAILED' 'IF NOT ERRORLEVEL 2 GOTO FAILED'
             'OPENTAPE --native-status > AUX' 'IF ERRORLEVEL 1 GOTO FAILED')
         for command in '--native-ready' '--native-lock' '--native-unlock'; do
