@@ -181,6 +181,11 @@ else
         ui_capture loaded '(Command completed; query position again|Befehl fertig; Position erneut abfragen)'
         ui_key p
         ui_capture after-load '(Session|Sitzung): 0000'
+        grep -Eq '(N Retension|N Band straffen)' "$OUT/ui-after-load.txt"
+        ui_action n retension
+        ui_capture retensioned '(Command completed; query position again|Befehl fertig; Position erneut abfragen)'
+        ui_key p
+        ui_capture after-retension '(Session|Sitzung): 0000'
     fi
 fi
 ui_key esc

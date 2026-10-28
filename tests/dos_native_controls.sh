@@ -20,9 +20,9 @@ for variant in "${variants[@]}"; do
     run_dir="$OUT/$MAXLANG-$variant"
     mkdir -p "$run_dir"
     defines=(-DNATIVE_PARTITIONS_TEST -DNATIVE_PROBE_TEST -DNATIVE_MEDIA_TEST -DNATIVE_POSITION_TEST -DNATIVE_LOCATE_TEST -DNATIVE_WIDE_TEST -DNATIVE_LOCK_TEST -DNATIVE_UI_TEST)
-    calls=18 diagnostic=0
+    calls=18 diagnostic=0 retensions=0
     case "$variant" in
-        normal) ;;
+        normal) calls=20; retensions=1 ;;
         alerts-normal) defines+=(-DNATIVE_ALERTS_TEST); calls=1 ;;
         alerts-all) defines+=(-DNATIVE_ALERTS_TEST -DNATIVE_ALERTS_KIND=1); calls=1 ;;
         alerts-clear) defines+=(-DNATIVE_ALERTS_TEST -DNATIVE_ALERTS_KIND=2); calls=1 ;;
@@ -63,7 +63,8 @@ for variant in "${variants[@]}"; do
         -Fo="$run_dir/MOCKASPI.SYS" tests/mockaspi.asm)
     nasm -f bin -o "$run_dir/QEXIT.COM" "$OPENASPI/../ahciaspi/tools/qexit.asm"
     nasm -f bin -DRESET=1 -o "$run_dir/RESET.COM" "$ROOT/tests/native_api_counts.asm"
-    nasm -f bin -DEXPECTED_CALLS="$calls" -DEXPECTED_WRITES=0 -o "$run_dir/COUNTS.COM" "$ROOT/tests/native_api_counts.asm"
+    nasm -f bin -DEXPECTED_CALLS="$calls" -DEXPECTED_WRITES=0 -DEXPECTED_RETENSIONS="$retensions" \
+        -o "$run_dir/COUNTS.COM" "$ROOT/tests/native_api_counts.asm"
     unzip -p "$SVARDOS_ZIP" svdos-1.44M-disk-1.img > "$run_dir/boot.img"
     while IFS= read -r file; do
         file=${file#::/}

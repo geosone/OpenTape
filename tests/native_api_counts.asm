@@ -48,6 +48,10 @@ start:
     cmp word [srb+14],EXPECTED_SETMARKS
     jne failed
 %endif
+%ifdef EXPECTED_RETENSIONS
+    cmp word [srb+16],EXPECTED_RETENSIONS
+    jne failed
+%endif
 %endif
     mov dx,ok
     mov ah,9

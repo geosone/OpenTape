@@ -89,7 +89,11 @@ static int execute(const struct ot_native_control_ops *ops, const char *name,
     if (result != 0) memset(result, 0, sizeof(*result));
     if (ops == 0 || ops->control == 0 || result == 0 || error == 0 ||
 #ifdef OT_NATIVE_TAPE_EXTENDED_SPACE
-        operation > OT_TAPE_CONTROL_SPACE_SEQ_SETMARKS ||
+        (operation > OT_TAPE_CONTROL_SPACE_SEQ_SETMARKS
+#ifdef OT_NATIVE_TAPE_RETENSION
+         && operation != OT_TAPE_CONTROL_RETENSION
+#endif
+        ) ||
 #elif defined(OT_NATIVE_TAPE_REMOVAL)
         operation > OT_TAPE_CONTROL_UNLOCK ||
 #else
@@ -110,6 +114,9 @@ static int execute(const struct ot_native_control_ops *ops, const char *name,
     else if (operation == OT_TAPE_CONTROL_SPACE_EOD) required = OT_TAPE_OP_SPACE_EOD;
     else if (operation == OT_TAPE_CONTROL_LOAD) required = OT_TAPE_OP_LOAD;
     else if (operation == OT_TAPE_CONTROL_UNLOAD) required = OT_TAPE_OP_UNLOAD;
+#ifdef OT_NATIVE_TAPE_RETENSION
+    else if (operation == OT_TAPE_CONTROL_RETENSION) required = OT_TAPE_OP_RETENSION;
+#endif
 #ifdef OT_NATIVE_TAPE_REMOVAL
     else if (operation == OT_TAPE_CONTROL_LOCK) required = OT_TAPE_OP_LOCK;
     else if (operation == OT_TAPE_CONTROL_UNLOCK) required = OT_TAPE_OP_UNLOCK;
@@ -151,6 +158,9 @@ int ot_native_execute(const struct ot_native_control_ops *ops, const char *name,
                       oa_u16 operation, struct ot_tape_control_v1 *result, unsigned *error)
 {
     return execute(ops, name, (operation <= OT_TAPE_CONTROL_REWIND ||
+#ifdef OT_NATIVE_TAPE_RETENSION
+                   operation == OT_TAPE_CONTROL_RETENSION ||
+#endif
 #ifdef OT_NATIVE_TAPE_REMOVAL
                    (operation >= OT_TAPE_CONTROL_LOAD && operation <= OT_TAPE_CONTROL_UNLOCK)
 #else

@@ -88,6 +88,11 @@ int ot_dos_native_command(int argc, char **argv)
     operation = strcmp(argv[1], "--native-rewind") == 0 ? OT_TAPE_CONTROL_REWIND :
         strcmp(argv[1], "--native-load") == 0 ? OT_TAPE_CONTROL_LOAD :
         strcmp(argv[1], "--native-unload") == 0 ? OT_TAPE_CONTROL_UNLOAD : OT_TAPE_CONTROL_READY;
+#ifdef OT_NATIVE_TAPE_RETENSION
+    if (strcmp(argv[1], "--native-retension") == 0) operation = OT_TAPE_CONTROL_RETENSION;
+#else
+    if (strcmp(argv[1], "--native-retension") == 0) { puts(OT_MSG_NATIVE_RETENSION_MISSING); return 2; }
+#endif
 #ifdef OT_NATIVE_TAPE_REMOVAL
     if (strcmp(argv[1], "--native-lock") == 0) operation = OT_TAPE_CONTROL_LOCK;
     else if (strcmp(argv[1], "--native-unlock") == 0) operation = OT_TAPE_CONTROL_UNLOCK;
@@ -276,6 +281,9 @@ int ot_dos_native_command(int argc, char **argv)
         if (movement) printf(OT_MSG_NATIVE_SPACE, name, operation, (long)count);
         else if (operation == OT_TAPE_CONTROL_LOAD) printf(OT_MSG_NATIVE_LOAD, name);
         else if (operation == OT_TAPE_CONTROL_UNLOAD) printf(OT_MSG_NATIVE_UNLOAD, name);
+#ifdef OT_NATIVE_TAPE_RETENSION
+        else if (operation == OT_TAPE_CONTROL_RETENSION) printf(OT_MSG_NATIVE_RETENSION, name);
+#endif
 #ifdef OT_NATIVE_TAPE_REMOVAL
         else if (operation == OT_TAPE_CONTROL_LOCK) printf(OT_MSG_NATIVE_LOCK, name);
         else if (operation == OT_TAPE_CONTROL_UNLOCK) printf(OT_MSG_NATIVE_UNLOCK, name);

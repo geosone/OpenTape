@@ -41,6 +41,14 @@ static unsigned query(void *v, struct ot_tape_info_v1 *p)
     if (f->query_guard) ((unsigned char *)p)[sizeof(*p)]=0;
     return 0;
 }
+/* Media actions that move tape: LOAD/UNLOAD and RETENSION, not removal. */
+static int moving_media(oa_u16 op)
+{
+#ifdef OT_NATIVE_TAPE_RETENSION
+    if(op==OT_TAPE_CONTROL_RETENSION) return 1;
+#endif
+    return op<12;
+}
 static unsigned controlled(void *v, struct ot_tape_control_v1 *p)
 {
     struct fixture *f = (struct fixture *)v;
@@ -50,7 +58,8 @@ static unsigned controlled(void *v, struct ot_tape_control_v1 *p)
     if (f->mismatch) p->operation=p->operation==0 ? 1 : 0;
     p->result=f->control_result;
     if (p->result!=OT_TAPE_RESULT_BUSY) {
-        p->scsi_opcode=ot_native_space_operation(p->operation) ? 0x11 : p->operation>=12 ? 0x1e : p->operation>=10 ? 0x1b : p->operation>=7 ? 0x11 : (oa_u8)p->operation;
+        p->scsi_opcode=ot_native_space_operation(p->operation) ? 0x11 :
+            (p->operation>=10 && moving_media(p->operation)) ? 0x1b : p->operation>=12 ? 0x1e : p->operation>=10 ? 0x1b : p->operation>=7 ? 0x11 : (oa_u8)p->operation;
         p->completion_flags=OT_TAPE_COMPLETION_SUBMITTED;
         if (p->result==OT_TAPE_RESULT_OK) {
             p->completion_flags|=OT_TAPE_COMPLETION_DONE |
@@ -58,8 +67,8 @@ static unsigned controlled(void *v, struct ot_tape_control_v1 *p)
                  p->operation==OT_TAPE_CONTROL_READY ? OT_TAPE_COMPLETION_READY : 0u);
         } else {
             if (p->operation!=OT_TAPE_CONTROL_READY &&
-                (p->operation<12 || ot_native_space_operation(p->operation))) p->completion_flags|=OT_TAPE_POSITION_UNKNOWN;
-            if ((p->operation>=7 && p->operation<12) || ot_native_space_operation(p->operation)) p->session_state=OT_TAPE_SESSION_NATIVE_FAILED;
+                (moving_media(p->operation) || ot_native_space_operation(p->operation))) p->completion_flags|=OT_TAPE_POSITION_UNKNOWN;
+            if ((p->operation>=7 && moving_media(p->operation)) || ot_native_space_operation(p->operation)) p->session_state=OT_TAPE_SESSION_NATIVE_FAILED;
             p->diagnostic_class=OT_TAPE_DIAG_TARGET;
             p->target_status=2; p->sense_key=2; p->sense_response=0x70; p->asc=0x3a;
         }
@@ -67,7 +76,7 @@ static unsigned controlled(void *v, struct ot_tape_control_v1 *p)
     if (p->operation>=10) {
         if (p->result==0) p->session_state=f->session;
         else if (p->result==3) p->session_state=f->session|
-            ((p->operation<12 || ot_native_space_operation(p->operation)) ? OT_TAPE_SESSION_NATIVE_FAILED : 0u);
+            ((moving_media(p->operation) || ot_native_space_operation(p->operation)) ? OT_TAPE_SESSION_NATIVE_FAILED : 0u);
     }
     if (f->count_mismatch) ++p->count;
     if (f->bad_control) p->completion_flags|=0x8000u;
@@ -441,6 +450,37 @@ static void media(struct fixture *f, const struct ot_native_control_ops *ops)
     assert(ot_native_space(ops,"drive-A",10,0,&c,&error)==OT_NATIVE_ARGUMENT && f->count==0);
     assert(ot_native_execute(ops,"drive-A",0xffffu,&c,&error)==OT_NATIVE_ARGUMENT && f->count==0);
 }
+
+#ifdef OT_NATIVE_TAPE_RETENSION
+/* Its own capability bit (LOAD does not imply it); a media action that
+ * preserves abandoned DIRTY|FAILED and leaves FAILED after a command error. */
+static void retension(struct fixture *f, const struct ot_native_control_ops *ops)
+{
+    struct ot_tape_control_v1 c;
+    unsigned error,state;
+    const oa_u16 op=OT_TAPE_CONTROL_RETENSION;
+    reset(f); f->operations=OT_TAPE_OP_QUERY|OT_TAPE_OP_RETENSION;
+    assert(ot_native_execute(ops,"drive-A",op,&c,&error)==0);
+    assert(c.scsi_opcode==0x1b && c.completion_flags==3 && c.count==0 && strcmp(f->trace,"OIQXC")==0);
+    reset(f); f->operations=0x1fffffffUL;
+    assert(ot_native_execute(ops,"drive-A",op,&c,&error)==OT_NATIVE_UNSUPPORTED);
+    assert(strcmp(f->trace,"OIQC")==0);
+    reset(f); f->operations=OT_TAPE_OP_QUERY|OT_TAPE_OP_RETENSION; f->control_result=3;
+    assert(ot_native_execute(ops,"drive-A",op,&c,&error)==OT_NATIVE_COMMAND);
+    assert(c.completion_flags==5 && c.session_state==OT_TAPE_SESSION_NATIVE_FAILED);
+    for(state=0x40;state<=0x60;state+=0x20) {
+        reset(f); f->operations=0x3fffffffUL; f->session=(oa_u16)state;
+        assert(ot_native_execute(ops,"drive-A",op,&c,&error)==0 && c.session_state==state);
+    }
+    for(state=1;state<=0x10;state<<=1) {
+        reset(f); f->operations=0x3fffffffUL; f->session=(oa_u16)state;
+        assert(ot_native_execute(ops,"drive-A",op,&c,&error)==OT_NATIVE_BUSY);
+        assert(strcmp(f->trace,"OIQC")==0);
+    }
+    reset(f); f->operations=0x3fffffffUL;
+    assert(ot_native_space(ops,"drive-A",op,0,&c,&error)==OT_NATIVE_ARGUMENT && f->count==0);
+}
+#endif
 
 #ifdef OT_NATIVE_TAPE_POSITION
 static unsigned positioned(void *v,struct ot_tape_position_v1 *p)
@@ -964,6 +1004,9 @@ int main(void)
     fixed_sessions(&f,&ops.query);
     spaces(&f, &ops);
     media(&f, &ops);
+#ifdef OT_NATIVE_TAPE_RETENSION
+    retension(&f, &ops);
+#endif
 #ifdef OT_NATIVE_TAPE_POSITION
     positions(&f,&ops.query);
 #endif

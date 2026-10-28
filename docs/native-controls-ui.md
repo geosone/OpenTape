@@ -13,6 +13,7 @@ device screen; digits in a target field cannot select another drive.
 | A | Explicitly retrieve TapeAlert after acknowledgment |
 | G | Enter a logical target and optional explicit partition |
 | L / U | Load / unload the selected tape |
+| N | Retension: LOAD with RETEN, own capability bit, no BOT claim |
 | K / O | Prevent / allow cartridge removal |
 | R | Explicit synchronous rewind |
 | ESC | Cancel editing/confirmation, or return to the device screen |
@@ -141,7 +142,7 @@ than using a production test hook. Exact command counters prove that invalid
 input, canceled commands, busy sessions, rejected ordinary files and missing
 aliases cause no unexpected SCSI submissions. The complete normal workflow
 covers full-width positioning, explicit/current partition, locks, prevented
-UNLOAD, retained uncertainty, recovery, empty drive and reload.
+UNLOAD, retained uncertainty, recovery, empty drive, reload and retension.
 
 Fault cases cover host/deferred/unsupported movement errors, a changed cursor
 after failure, position observation without recovery and busy rejection until

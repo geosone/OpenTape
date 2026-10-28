@@ -209,26 +209,28 @@ fixtures. Host tests check signed bounds, individual capability bits, malformed
 replies and first-error cleanup; the harness also runs in German. Physical
 movement and optional-device behavior remain to be qualified.
 
-## Synchronous native LOAD/UNLOAD
+## Synchronous native LOAD/UNLOAD/RETENSION
 
 ```text
 OPENTAPE --native-unload --device NRMT0
 OPENTAPE --native-load --device NRMT0
+OPENTAPE --native-retension --device NRMT0
 OPENTAPE --native-ready --device NRMT0
 OPENTAPE --native-rewind --device NRMT0
 ```
 
 `ot_native_execute` and its DOS wrapper now accept LOAD (10, capability
-`4000h`) and UNLOAD (11, `8000h`). Each issues one synchronous sequential
-`1Bh` command with zero count/flags/block size. The complete current provider
-mask, including removal controls below, is `1FFFFFFFh`; individual bits still describe provider support, not
-confirmed drive capabilities. No implicit readiness check, rewind, marks,
-retension or retry occurs. Successful media completion (`0003h`) claims
+`4000h`), UNLOAD (11, `8000h`) and RETENSION (18, `20000000h`, LOAD with
+RETEN). Each issues one synchronous sequential `1Bh` command with zero
+count/flags/block size. The complete current provider mask, including removal
+controls below, is `3FFFFFFFh`; individual bits still describe provider
+support, not confirmed drive capabilities, and LOAD never implies RETENSION.
+No implicit readiness check, rewind, marks, retension or retry occurs. Successful media completion (`0003h`) claims
 neither BOT nor readiness. A physically missing cartridge still needs manual
 insertion. Changer control remains separate.
 
 Active writers and legacy/buffered/rewinding sessions remain BUSY. Explicit
-LOAD/UNLOAD are allowed for recovery after a failed/abandoned native session,
+LOAD/UNLOAD/RETENSION are allowed for recovery after a failed/abandoned native session,
 but preserve FAILED (`40h`) and DIRTY|FAILED (`60h`). Success of a media action
 cannot finalize abandoned output. The CLI prints the retained-state warning
 even when the media action succeeds (exit 0); native status remains exit 2.
@@ -249,7 +251,7 @@ OPENTAPE --native-unlock --device NRMT0
 
 LOCK (12, provider capability `00010000h`) and UNLOCK (13, `00020000h`)
 use the existing `ot_native_execute` and DOS wrapper. The complete provider
-mask is now `1FFFFFFFh`; retain the full DWORD rather than truncating to a WORD.
+mask is now `3FFFFFFFh`; retain the full DWORD rather than truncating to a WORD.
 They each submit one synchronous six-byte `1Eh` PREVENT/ALLOW MEDIUM REMOVAL
 command, without data, retries or other media operations.
 
@@ -281,7 +283,7 @@ OPENTAPE --native-position --device NRMT0
 
 The optional `ot_native_position` / `ot_dos_native_position` API uses a separate
 64-byte position packet and DOS function 4. Capability `00040000h` brings the
-complete current provider mask to `1FFFFFFFh`. Each query submits one ten-byte
+complete current provider mask to `3FFFFFFFh`. Each query submits one ten-byte
 READ POSITION (`34h`) in short logical form; no movement, flush, mark, retry,
 implicit LOCATE or six-byte vendor fallback occurs.
 
@@ -319,7 +321,7 @@ OPENTAPE --native-position --device NRMT0
 
 `ot_native_locate` and `ot_dos_native_locate` use a separate 64-byte target
 packet (DOS function 5). Capability `00080000h` brings the current mask to
-`1FFFFFFFh`. Addresses are unsigned 32-bit logical objects, not byte offsets
+`3FFFFFFFh`. Addresses are unsigned 32-bit logical objects, not byte offsets
 or archive file IDs. Flags 0 select the current partition and require request
 partition zero; `OT_TAPE_LOCATE_PARTITION` explicitly selects partition 0..255.
 The caller establishes that an explicit target partition exists. No automatic
@@ -365,7 +367,7 @@ READ POSITION response (service action `06h`). `ot_native_locate64` /
 Each has an explicit format-1 64-byte packet on the established function 4/5;
 format 0 and its old packet layouts are unchanged. Capabilities `00100000h`
 and `00200000h` advertise these wide operations. The complete current provider
-mask, including PARTITIONS, is `1FFFFFFFh`. Wide support is
+mask, including PARTITIONS, is `3FFFFFFFh`. Wide support is
 checked independently; no automatic short-form fallback or truncation occurs.
 
 Coordinates use explicit low/high DWORDs throughout the portable SDK and DOS
@@ -395,8 +397,8 @@ and OpenASPI's `docs/native-tape-wide.md`. Hardware and Windows qualification,
 
 The [DOS native control screen](native-controls-ui.md) now consumes these
 operations through the same SDK: T opens the subview, P reads position and G
-edits a full-width target with explicit confirmation. Load/unload, removal
-locks and rewind share the established ownership and failure rules.
+edits a full-width target with explicit confirmation. Load/unload, retension
+(N), removal locks and rewind share the established ownership and failure rules.
 
 ## Reported partition layout
 
@@ -424,7 +426,7 @@ The native SDK and CLI expose `--native-space-seq-filemarks N`,
 signed decimal -8388608..8388607 and optional `--device NRMT0`. CONTROL enums
 14/15/16 map to SPACE codes 2/4/5, respectively. The individual provider bits
 are `00800000h`, `01000000h` and `02000000h`; the complete current provider
-mask is `1FFFFFFFh`. The 64-byte packet, version and count offset are unchanged.
+mask is `3FFFFFFFh`. The 64-byte packet, version and count offset are unchanged.
 
 Consecutive spacing seeks N adjacent matching marks, rather than counting N
 separate runs. Setmarks remain distinct from filemarks. All operations use the

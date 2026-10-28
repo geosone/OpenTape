@@ -32,6 +32,11 @@ int ot_native_space_operation(oa_u16);
 #define OT_NATIVE_TAPE_WRITE_SETMARK 1
 #endif
 
+/* LOAD with RETEN: a separate capability bit, never implied by LOAD. */
+#ifdef OT_TAPE_CONTROL_RETENSION
+#define OT_NATIVE_TAPE_RETENSION 1
+#endif
+
 enum ot_native_result {
     OT_NATIVE_OK = 0,
     OT_NATIVE_ARGUMENT = -200,

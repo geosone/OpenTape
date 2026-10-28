@@ -63,6 +63,9 @@ static const char *action_name(unsigned action)
     if(action==UI_LOCATE) return OT_MSG_NUI_LOCATE;
     if(action==OT_TAPE_CONTROL_LOAD) return OT_MSG_NUI_LOAD;
     if(action==OT_TAPE_CONTROL_UNLOAD) return OT_MSG_NUI_UNLOAD;
+#ifdef OT_NATIVE_TAPE_RETENSION
+    if(action==OT_TAPE_CONTROL_RETENSION) return OT_MSG_NUI_RETENSION;
+#endif
 #ifdef OT_NATIVE_TAPE_REMOVAL
     if(action==OT_TAPE_CONTROL_LOCK) return OT_MSG_NUI_LOCK;
     if(action==OT_TAPE_CONTROL_UNLOCK) return OT_MSG_NUI_UNLOCK;
@@ -221,6 +224,7 @@ static void draw(const struct tape_ui *s,ot_native_ui_line line)
     ot_dos_ui_action(line,1u,10,OT_MSG_NUI_HELP_UNLOCK,QuickBackColor,'o');
     ot_dos_ui_action(line,1u,11,OT_MSG_NUI_ALERTS_HELP,QuickBackColor,'a');
     ot_dos_ui_action(line,1u,12,OT_MSG_UI_HELP_REWIND,QuickBackColor,'r');
+    ot_dos_ui_action(line,1u,13,OT_MSG_NUI_HELP_RETENSION,QuickBackColor,'n');
     ot_dos_ui_action(line,1u,14,OT_MSG_NUI_BACK,QuickBackColor,KEY_ESCAPE);
     if(s->phase==T_CONFIRM || s->phase==T_BLOCK || s->phase==T_PARTITION ||
        s->phase==T_SPACE_COUNT || s->phase==T_SPACE_KIND || s->phase==T_BUSY) {
@@ -374,6 +378,13 @@ void ot_dos_native_controls_ui(const char *alias,ot_native_ui_line line)
             if(key=='r' || key=='R') s.action=OT_TAPE_CONTROL_REWIND;
             else if(key=='l' || key=='L') s.action=OT_TAPE_CONTROL_LOAD;
             else if(key=='u' || key=='U') s.action=OT_TAPE_CONTROL_UNLOAD;
+#ifdef OT_NATIVE_TAPE_RETENSION
+            else if(key=='n' || key=='N') s.action=OT_TAPE_CONTROL_RETENSION;
+#else
+            else if(key=='n' || key=='N') {
+                s.phase=T_NOTICE; s.notice=OT_MSG_NUI_MISSING; draw(&s,line); continue;
+            }
+#endif
 #ifdef OT_NATIVE_TAPE_REMOVAL
             else if(key=='k' || key=='K') s.action=OT_TAPE_CONTROL_LOCK;
             else if(key=='o' || key=='O') s.action=OT_TAPE_CONTROL_UNLOCK;

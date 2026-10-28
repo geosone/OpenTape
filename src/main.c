@@ -1279,6 +1279,7 @@ int main(int argc, char **argv)
         strcmp(argv[1], "--native-space-seq-setmarks") == 0 ||
         strcmp(argv[1], "--native-eod") == 0 || strcmp(argv[1], "--native-load") == 0 ||
         strcmp(argv[1], "--native-unload") == 0 ||
+        strcmp(argv[1], "--native-retension") == 0 ||
         strcmp(argv[1], "--native-lock") == 0 ||
         strcmp(argv[1], "--native-unlock") == 0 ||
         strcmp(argv[1], "--native-alerts") == 0 ||

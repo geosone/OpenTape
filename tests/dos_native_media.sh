@@ -1,5 +1,5 @@
 #!/bin/bash
-# Synchronous LOAD/UNLOAD through the installed provider/SDK and localized CLI.
+# Synchronous LOAD/UNLOAD/RETENSION through the installed provider/SDK and localized CLI.
 # Each run has a disposable DOS image and memory-only SCSIMGR$; no host tape.
 set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
@@ -19,7 +19,7 @@ for variant in "${variants[@]}"; do
     run_dir="$OUT/$MAXLANG-$variant"
     mkdir -p "$run_dir"
     defines=(-DNATIVE_PROBE_TEST -DNATIVE_MEDIA_TEST)
-    argument='' calls=17 cli_calls=7 first='--native-load'
+    argument='' calls=17 cli_calls=8 first='--native-load'
     case "$variant" in
         normal) ;;
         legacy) defines+=(-DNO_RESIDUAL) ;;
@@ -39,7 +39,7 @@ for variant in "${variants[@]}"; do
     nasm -f bin -o "$run_dir/QEXIT.COM" "$OPENASPI/../ahciaspi/tools/qexit.asm"
     nasm -f bin -DRESET=1 -o "$run_dir/RESET.COM" "$ROOT/tests/native_api_counts.asm"
     nasm -f bin -DEXPECTED_CALLS="$calls" -DEXPECTED_WRITES="$writes" -o "$run_dir/COUNTS.COM" "$ROOT/tests/native_api_counts.asm"
-    nasm -f bin -DEXPECTED_CALLS="$cli_calls" -o "$run_dir/CLI.COM" "$ROOT/tests/native_api_counts.asm"
+    nasm -f bin -DEXPECTED_CALLS="$cli_calls" -DEXPECTED_RETENSIONS=1 -o "$run_dir/CLI.COM" "$ROOT/tests/native_api_counts.asm"
     unzip -p "$SVARDOS_ZIP" svdos-1.44M-disk-1.img > "$run_dir/boot.img"
     while IFS= read -r file; do
         file=${file#::/}
@@ -49,7 +49,7 @@ for variant in "${variants[@]}"; do
     lines=('@ECHO OFF' 'RESET > AUX' 'IF ERRORLEVEL 1 GOTO FAILED' "NTMEDIA $argument > AUX"
         'IF ERRORLEVEL 1 GOTO FAILED' 'COUNTS > AUX' 'IF ERRORLEVEL 1 GOTO FAILED'
         'RESET > AUX' 'IF ERRORLEVEL 1 GOTO FAILED')
-    for command in '--native-load 1' '--native-unload 1' '--native-load --refresh' \
+    for command in '--native-load 1' '--native-unload 1' '--native-retension 1' '--native-load --refresh' \
         '--native-unload --device NRMT0 --device NRMT0' '--native-load --device RMT0'; do
         lines+=("OPENTAPE $command > AUX" 'IF ERRORLEVEL 2 GOTO FAILED' 'IF NOT ERRORLEVEL 1 GOTO FAILED')
     done
@@ -71,7 +71,8 @@ for variant in "${variants[@]}"; do
         lines+=('OPENTAPE --native --verify --all > AUX' 'IF ERRORLEVEL 1 GOTO READFAILED'
             'GOTO FAILED' ':READFAILED')
     fi
-    lines+=('OPENTAPE --native-load > AUX' 'IF ERRORLEVEL 1 GOTO FAILED')
+    lines+=('OPENTAPE --native-load > AUX' 'IF ERRORLEVEL 1 GOTO FAILED'
+        'OPENTAPE --native-retension > AUX' 'IF ERRORLEVEL 1 GOTO FAILED')
     if test -z "$argument"; then
         lines+=('OPENTAPE --native-ready > AUX' 'IF ERRORLEVEL 1 GOTO FAILED')
     fi
