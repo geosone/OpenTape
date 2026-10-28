@@ -1,6 +1,36 @@
 #ifndef OPENTAPE_NATIVE_TAPE_H
 #define OPENTAPE_NATIVE_TAPE_H
 #include "openaspi/tape_api.h"
+/* Older provider headers can still build the SDK. Removal controls need the
+ * matching wire enums/capability bits; never map an unknown CLI verb to READY. */
+#ifdef OT_TAPE_CONTROL_LOCK
+#define OT_NATIVE_TAPE_REMOVAL 1
+#endif
+
+#ifdef OT_TAPE_API_POSITION
+#define OT_NATIVE_TAPE_POSITION 1
+/* One-shot position observation. Coordinate validity and transfer provenance
+ * are part of the returned packet, separately from successful delivery. */
+#endif
+
+#ifdef OT_TAPE_API_LOCATE
+#define OT_NATIVE_TAPE_LOCATE 1
+#endif
+
+#ifdef OT_TAPE_OP_POSITION64
+#define OT_NATIVE_TAPE_WIDE 1
+#endif
+
+#ifdef OT_TAPE_CONTROL_SPACE_SETMARKS
+#define OT_NATIVE_TAPE_EXTENDED_SPACE 1
+#endif
+
+/* Classify the noncontiguous SPACE enums supported by the selected headers. */
+int ot_native_space_operation(oa_u16);
+
+#ifdef OT_TAPE_CONTROL_SETMARK
+#define OT_NATIVE_TAPE_WRITE_SETMARK 1
+#endif
 
 enum ot_native_result {
     OT_NATIVE_OK = 0,
@@ -18,7 +48,8 @@ enum ot_native_result {
 };
 
 /* Successful read with a stream condition; the validated record contains
- * both actual bytes and FILEMARK/EOM/ILI/EOD. Never infer EOF from zero alone.
+ * both actual bytes and FILEMARK/SETMARK/EOM/ILI/EOD (as supported by provider
+ * headers). Setmarks are not archive EOF. Never infer EOF from zero alone.
  */
 #define OT_NATIVE_STREAM 1
 
@@ -35,6 +66,77 @@ struct ot_native_ops {
     unsigned (*query)(void *, struct ot_tape_info_v1 *);
     unsigned (*close)(void *);
 };
+#ifdef OT_TAPE_API_ALERTS
+#define OT_NATIVE_TAPE_ALERTS 1
+/* Explicit retrieval can acknowledge device warnings; flags are mandatory. */
+struct ot_native_alerts_ops {
+    struct ot_native_ops query;
+    unsigned (*alerts)(void *,struct ot_tape_alerts_v1 *);
+};
+int ot_native_alerts(const struct ot_native_alerts_ops *,const char *,oa_u16,
+                      struct ot_tape_alerts_v1 *,unsigned *);
+#ifdef DOS_VERSION
+int ot_dos_native_alerts(const char *,oa_u16,struct ot_tape_alerts_v1 *,unsigned *);
+#endif
+#endif
+
+#ifdef OT_TAPE_API_PARTITIONS
+#define OT_NATIVE_TAPE_PARTITIONS 1
+/* Reported MODE SENSE layout can be pending; it is not a LOCATE whitelist. */
+struct ot_native_partitions_ops {
+    struct ot_native_ops query;
+    unsigned (*partitions)(void *, struct ot_tape_partitions_v1 *);
+};
+int ot_native_partitions(const struct ot_native_partitions_ops *, const char *,
+                         struct ot_tape_partitions_v1 *, unsigned *);
+#ifdef DOS_VERSION
+int ot_dos_native_partitions(const char *, struct ot_tape_partitions_v1 *, unsigned *);
+#endif
+#endif
+
+#ifdef OT_NATIVE_TAPE_POSITION
+struct ot_native_position_ops {
+    struct ot_native_ops query;
+    unsigned (*position)(void *, struct ot_tape_position_v1 *);
+};
+int ot_native_position(const struct ot_native_position_ops *, const char *,
+                       struct ot_tape_position_v1 *, unsigned *);
+#ifdef DOS_VERSION
+int ot_dos_native_position(const char *, struct ot_tape_position_v1 *, unsigned *);
+#endif
+#endif
+
+#ifdef OT_NATIVE_TAPE_LOCATE
+/* Explicit logical movement. Flags select current/explicit partition; no
+ * automatic retry, emulation or recovery after an uncertain completion. */
+struct ot_native_locate_ops {
+    struct ot_native_ops query;
+    unsigned (*locate)(void *, struct ot_tape_locate_v1 *);
+};
+int ot_native_locate(const struct ot_native_locate_ops *, const char *, oa_u16 flags,
+                     oa_u32 partition, oa_u32 block, struct ot_tape_locate_v1 *, unsigned *);
+#ifdef DOS_VERSION
+int ot_dos_native_locate(const char *, oa_u16, oa_u32, oa_u32, struct ot_tape_locate_v1 *, unsigned *);
+#endif
+#endif
+
+#ifdef OT_NATIVE_TAPE_WIDE
+struct ot_native_position64_ops {
+    struct ot_native_ops query;
+    unsigned (*position)(void *,struct ot_tape_position64_v1 *);
+};
+struct ot_native_locate64_ops {
+    struct ot_native_ops query;
+    unsigned (*locate)(void *,struct ot_tape_locate64_v1 *);
+};
+int ot_native_position64(const struct ot_native_position64_ops *,const char *,struct ot_tape_position64_v1 *,unsigned *);
+int ot_native_locate64(const struct ot_native_locate64_ops *,const char *,oa_u16,oa_u32,oa_u32,oa_u32,struct ot_tape_locate64_v1 *,unsigned *);
+#ifdef DOS_VERSION
+int ot_dos_native_position64(const char *,struct ot_tape_position64_v1 *,unsigned *);
+int ot_dos_native_locate64(const char *,oa_u16,oa_u32,oa_u32,oa_u32,struct ot_tape_locate64_v1 *,unsigned *);
+#endif
+#endif
+
 struct ot_native_control_ops {
     struct ot_native_ops query;
     unsigned (*control)(void *, struct ot_tape_control_v1 *);
@@ -75,6 +177,7 @@ struct ot_native_writer {
     unsigned opened, claimed, unfinished, platform_error;
     int failure;
     oa_u32 block_size; /* zero variable, otherwise explicit bytes per physical block */
+    oa_u32 operations; /* provider capabilities observed on this writer handle */
     struct ot_tape_record_v1 last_record;
     struct ot_tape_control_v1 last_control;
 };
@@ -83,6 +186,10 @@ int ot_native_writer_open_fixed(struct ot_native_writer *, const struct ot_nativ
 int ot_native_writer_write(struct ot_native_writer *, const void *, unsigned);
 int ot_native_writer_flush(struct ot_native_writer *);
 int ot_native_writer_filemark(struct ot_native_writer *);
+#ifdef OT_NATIVE_TAPE_WRITE_SETMARK
+/* Exactly one setmark in an active writer; unsupported provider does no I/O. */
+int ot_native_writer_setmark(struct ot_native_writer *);
+#endif
 int ot_native_writer_finish(struct ot_native_writer *);
 int ot_native_writer_abort(struct ot_native_writer *);
 int ot_native_writer_close(struct ot_native_writer *);
@@ -93,9 +200,14 @@ int ot_native_writer_close(struct ot_native_writer *);
  */
 int ot_native_probe(const struct ot_native_ops *, const char *, oa_u16 flags,
                     struct ot_tape_info_v1 *, unsigned *platform_error);
-/* READY/REWIND and explicit LOAD/UNLOAD; movement counts use ot_native_space. */
+/* READY/REWIND, explicit LOAD/UNLOAD and removal LOCK/UNLOCK.
+ * LOCK controls cartridge removal, not writer ownership or write protection.
+ * Movement counts use ot_native_space. */
 int ot_native_execute(const struct ot_native_control_ops *, const char *,
                       oa_u16 operation, struct ot_tape_control_v1 *, unsigned *);
+/* Bounded signed decimal input for the shared CLI/UI SPACE count editor.
+ * Accept -8388608..8388607; malformed input preserves the output, with no I/O. */
+int ot_native_space_count_parse(const char *, oa_s32 *);
 /* One-shot signed SPACE, with capability/ownership checks and echoed count.
  * No fallback, retry or inferred absolute position. */
 int ot_native_space(const struct ot_native_control_ops *, const char *, oa_u16,
@@ -125,6 +237,9 @@ int ot_dos_native_writer_open_fixed(struct ot_dos_native_writer *, const char *,
 int ot_dos_native_writer_write(struct ot_dos_native_writer *, const void *, unsigned);
 int ot_dos_native_writer_flush(struct ot_dos_native_writer *);
 int ot_dos_native_writer_filemark(struct ot_dos_native_writer *);
+#ifdef OT_NATIVE_TAPE_WRITE_SETMARK
+int ot_dos_native_writer_setmark(struct ot_dos_native_writer *);
+#endif
 int ot_dos_native_writer_finish(struct ot_dos_native_writer *);
 int ot_dos_native_writer_abort(struct ot_dos_native_writer *);
 int ot_dos_native_writer_close(struct ot_dos_native_writer *);

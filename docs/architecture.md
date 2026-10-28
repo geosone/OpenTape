@@ -35,3 +35,9 @@ LTFS remains a later optional backend for drives and cartridges with the
 required two-partition capability. It needs operations not present in the
 historical ASPITAPE API and therefore requires detected OpenASPI extensions or
 direct ASPI. TAR is reserved for a later import/export compatibility path.
+
+
+Explicit DOS settings profiles use a separate small versioned codec, not the tape
+archive format. Backup/path models own their strings; decoding commits both
+only after complete file/CRC/field validation. Profiles contain no tape state,
+selection/replacement grants or action permission. See [profiles](settings-profiles.md).

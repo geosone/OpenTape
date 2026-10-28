@@ -6,6 +6,14 @@
 #include <string.h>
 #include "opentape/archive_native.h"
 
+/* OTB1 uses filemarks as delimiters. Setmarks need an explicit future archive
+ * contract; neither zero bytes nor a SCSI mark bit authorizes accepting EOF. */
+#ifdef OT_TAPE_STREAM_SETMARK
+#define ARCHIVE_SETMARK OT_TAPE_STREAM_SETMARK
+#else
+#define ARCHIVE_SETMARK 0UL
+#endif
+
 static void read_diagnostics(struct ot_tape_reader *r, const struct ot_native_reader *n)
 {
     r->dos_error = n->platform_error;
@@ -46,7 +54,7 @@ static int read_fixed(struct ot_tape_reader *r, void *data, unsigned capacity, u
         r->backend_result = rc;
         read_diagnostics(r, n);
         if (rc < 0 || (n->last.completion_flags & OT_TAPE_COUNT_VALID) == 0u ||
-            (n->last.stream_flags & (OT_TAPE_STREAM_EOM | OT_TAPE_STREAM_EOD | OT_TAPE_STREAM_TRUNCATED)) != 0UL)
+            (n->last.stream_flags & (OT_TAPE_STREAM_EOM | OT_TAPE_STREAM_EOD | OT_TAPE_STREAM_TRUNCATED | ARCHIVE_SETMARK)) != 0UL)
             return fixed_read_error(r, 0);
         got = (unsigned)n->last.actual;
         mark = (n->last.stream_flags & OT_TAPE_STREAM_FILEMARK) != 0UL;
@@ -97,7 +105,7 @@ static int read_record(struct ot_tape_reader *r, void *data, unsigned capacity, 
     r->backend_result = rc;
     read_diagnostics(r, n);
     if (rc < 0 || (n->last.completion_flags & OT_TAPE_COUNT_VALID) == 0u ||
-        (n->last.stream_flags & (OT_TAPE_STREAM_EOM | OT_TAPE_STREAM_EOD | OT_TAPE_STREAM_TRUNCATED)) != 0UL) {
+        (n->last.stream_flags & (OT_TAPE_STREAM_EOM | OT_TAPE_STREAM_EOD | OT_TAPE_STREAM_TRUNCATED | ARCHIVE_SETMARK)) != 0UL) {
         r->failed = 1u;
         return OT_READ_IO_ERROR;
     }

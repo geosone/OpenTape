@@ -10,6 +10,13 @@
  * the pointer or reenter. A nonzero result stops input immediately. */
 typedef int (*ot_metadata_visitor)(void *, oa_u32 session, oa_u32 object,
                                   const struct ot_file_metadata *);
+/* Read-only observer after complete block verification and successful metadata
+ * visitors. Borrowed state/block remain valid only during the call. No filesystem/tape I/O,
+ * mutation, retained pointers or reentry (including session constructors).
+ * There is no filemark/finish/close event and no success authority. */
+typedef void (*ot_verify_observer)(void *, const struct ot_archive_verify *, const oa_u8 *, unsigned);
+int ot_verify_stream_observed(struct ot_tape_reader *, struct ot_archive_verify *,
+    oa_u8 *, unsigned, oa_u32 limit, ot_metadata_visitor, void *, ot_verify_observer, void *);
 /* Reader is already open, raw variable-block and positioned at the label;
  * verifier state must be zero initialized there.
  * limit=0 reads until the first filemark. The caller owns close and buffers.
@@ -33,4 +40,10 @@ int ot_verify_session(const struct ot_reader_ops *, const char *, oa_u8 *, unsig
 /* Run and close a reader already opened by a selected platform backend.
  * Invalid arguments leave ownership with the caller. */
 int ot_verify_session_opened(oa_u8 *, unsigned, ot_metadata_visitor, void *, struct ot_verify_session_result *);
+/* Observed equivalents preserve the ordinary session ownership/error rules.
+ * A failed visitor, block, read or close cannot create a completion event. */
+int ot_verify_session_observed(const struct ot_reader_ops *, const char *, oa_u8 *, unsigned,
+    ot_metadata_visitor, void *, ot_verify_observer, void *, struct ot_verify_session_result *);
+int ot_verify_session_opened_observed(oa_u8 *, unsigned, ot_metadata_visitor, void *,
+    ot_verify_observer, void *, struct ot_verify_session_result *);
 #endif

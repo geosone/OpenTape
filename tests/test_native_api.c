@@ -50,22 +50,24 @@ static unsigned controlled(void *v, struct ot_tape_control_v1 *p)
     if (f->mismatch) p->operation=p->operation==0 ? 1 : 0;
     p->result=f->control_result;
     if (p->result!=OT_TAPE_RESULT_BUSY) {
-        p->scsi_opcode=p->operation>=10 ? 0x1b : p->operation>=7 ? 0x11 : (oa_u8)p->operation;
+        p->scsi_opcode=ot_native_space_operation(p->operation) ? 0x11 : p->operation>=12 ? 0x1e : p->operation>=10 ? 0x1b : p->operation>=7 ? 0x11 : (oa_u8)p->operation;
         p->completion_flags=OT_TAPE_COMPLETION_SUBMITTED;
         if (p->result==OT_TAPE_RESULT_OK) {
             p->completion_flags|=OT_TAPE_COMPLETION_DONE |
                 (p->operation==OT_TAPE_CONTROL_REWIND ? OT_TAPE_POSITION_BOT :
                  p->operation==OT_TAPE_CONTROL_READY ? OT_TAPE_COMPLETION_READY : 0u);
         } else {
-            if (p->operation!=OT_TAPE_CONTROL_READY) p->completion_flags|=OT_TAPE_POSITION_UNKNOWN;
-            if (p->operation>=7) p->session_state=OT_TAPE_SESSION_NATIVE_FAILED;
+            if (p->operation!=OT_TAPE_CONTROL_READY &&
+                (p->operation<12 || ot_native_space_operation(p->operation))) p->completion_flags|=OT_TAPE_POSITION_UNKNOWN;
+            if ((p->operation>=7 && p->operation<12) || ot_native_space_operation(p->operation)) p->session_state=OT_TAPE_SESSION_NATIVE_FAILED;
             p->diagnostic_class=OT_TAPE_DIAG_TARGET;
             p->target_status=2; p->sense_key=2; p->sense_response=0x70; p->asc=0x3a;
         }
     }
     if (p->operation>=10) {
         if (p->result==0) p->session_state=f->session;
-        else if (p->result==3) p->session_state=f->session|OT_TAPE_SESSION_NATIVE_FAILED;
+        else if (p->result==3) p->session_state=f->session|
+            ((p->operation<12 || ot_native_space_operation(p->operation)) ? OT_TAPE_SESSION_NATIVE_FAILED : 0u);
     }
     if (f->count_mismatch) ++p->count;
     if (f->bad_control) p->completion_flags|=0x8000u;
@@ -94,6 +96,18 @@ static unsigned read_record(void *v, void *data, unsigned capacity, struct ot_ta
     else if (f->read_kind == 6u) {
         p->actual = 0; p->stream_flags = OT_TAPE_STREAM_SHORT;
     }
+#ifdef OT_TAPE_STREAM_SETMARK
+    if(f->read_kind>=8 && f->read_kind<=14) {
+        p->actual=f->read_kind==9 ? 4 : 0; p->result=5; p->diagnostic_class=2;
+        p->target_status=2; p->sense_response=0x70; p->ascq=3;
+        p->stream_flags=OT_TAPE_STREAM_SETMARK|OT_TAPE_STREAM_SHORT;
+        if(f->read_kind==10) p->stream_flags=9;
+        if(f->read_kind==11) { p->result=3; p->sense_key=3; p->completion_flags=0x25; }
+        if(f->read_kind==12) p->sense_response=0x71;
+        if(f->read_kind==13) p->ascq=1;
+        if(f->read_kind==14) p->stream_flags|=OT_TAPE_STREAM_FILEMARK;
+    }
+#endif
     return 0u;
 }
 static unsigned writer_controlled(void *v, struct ot_tape_control_v1 *p)
@@ -388,33 +402,488 @@ static void media(struct fixture *f, const struct ot_native_control_ops *ops)
 {
     struct ot_tape_control_v1 c;
     unsigned error,op,state;
-    for(op=10;op<=11;++op) {
+#ifdef OT_NATIVE_TAPE_REMOVAL
+    unsigned last=13;
+#else
+    unsigned last=11;
+#endif
+    for(op=10;op<=last;++op) {
         oa_u32 bit=op==10 ? OT_TAPE_OP_LOAD : OT_TAPE_OP_UNLOAD;
+#ifdef OT_NATIVE_TAPE_REMOVAL
+        if(op>=12) bit=op==12 ? OT_TAPE_OP_LOCK : OT_TAPE_OP_UNLOCK;
+#endif
         reset(f); f->operations=OT_TAPE_OP_QUERY|bit;
         assert(ot_native_execute(ops,"drive-A",(oa_u16)op,&c,&error)==0);
-        assert(c.scsi_opcode==0x1b && c.completion_flags==3 && c.count==0 && strcmp(f->trace,"OIQXC")==0);
-        reset(f); f->operations=0xffffUL & ~bit;
+        assert(c.scsi_opcode==(op>=12 ? 0x1e : 0x1b) && c.completion_flags==3 && c.count==0 && strcmp(f->trace,"OIQXC")==0);
+        reset(f); f->operations=0x3ffffUL & ~bit;
         assert(ot_native_execute(ops,"drive-A",(oa_u16)op,&c,&error)==OT_NATIVE_UNSUPPORTED);
         assert(strcmp(f->trace,"OIQC")==0);
-        for(state=0x40;state<=0x60;state+=0x20) {
-            reset(f); f->operations=0xffffUL; f->session=(oa_u16)state;
-            assert(ot_native_execute(ops,"drive-A",(oa_u16)op,&c,&error)==0 && c.session_state==state);
-            reset(f); f->operations=0xffffUL; f->session=(oa_u16)state; f->control_result=3; f->close_error=53;
+        if(op>=12) {
+            reset(f); f->operations=OT_TAPE_OP_QUERY|bit; f->control_result=3;
             assert(ot_native_execute(ops,"drive-A",(oa_u16)op,&c,&error)==OT_NATIVE_COMMAND);
-            assert(c.session_state==state && c.completion_flags==5 && strcmp(f->trace,"OIQXC")==0);
+            assert(c.session_state==0 && c.completion_flags==1 && strcmp(f->trace,"OIQXC")==0);
+        }
+        for(state=0x40;state<=0x60;state+=0x20) {
+            reset(f); f->operations=0x3ffffUL; f->session=(oa_u16)state;
+            assert(ot_native_execute(ops,"drive-A",(oa_u16)op,&c,&error)==0 && c.session_state==state);
+            reset(f); f->operations=0x3ffffUL; f->session=(oa_u16)state; f->control_result=3; f->close_error=53;
+            assert(ot_native_execute(ops,"drive-A",(oa_u16)op,&c,&error)==OT_NATIVE_COMMAND);
+            assert(c.session_state==state && c.completion_flags==(op>=12 ? 1u : 5u) && strcmp(f->trace,"OIQXC")==0);
         }
         for(state=1;state<=0x10;state<<=1) {
-            reset(f); f->operations=0xffffUL; f->session=(oa_u16)state;
+            reset(f); f->operations=0x3ffffUL; f->session=(oa_u16)state;
             assert(ot_native_execute(ops,"drive-A",(oa_u16)op,&c,&error)==OT_NATIVE_BUSY);
             assert(strcmp(f->trace,"OIQC")==0);
         }
     }
-    reset(f); f->operations=0xffffUL;
+    reset(f); f->operations=0x3ffffUL;
     assert(ot_native_execute(ops,"drive-A",7,&c,&error)==OT_NATIVE_ARGUMENT && f->count==0);
     assert(ot_native_space(ops,"drive-A",10,0,&c,&error)==OT_NATIVE_ARGUMENT && f->count==0);
     assert(ot_native_execute(ops,"drive-A",0xffffu,&c,&error)==OT_NATIVE_ARGUMENT && f->count==0);
 }
 
+#ifdef OT_NATIVE_TAPE_POSITION
+static unsigned positioned(void *v,struct ot_tape_position_v1 *p)
+{
+    struct fixture *f=(struct fixture *)v;
+    event(f,'P');
+    if(f->control_error) return f->control_error;
+    p->scsi_opcode=0x34; p->completion_flags=3; p->valid_fields=1;
+    p->session_state=f->session; p->partition=2; p->first_block=0x89abcdefUL; p->last_block=0xfedcba98UL;
+    if(f->read_kind) {
+        p->valid_fields=0; p->partition=p->first_block=p->last_block=0;
+        if(f->read_kind==1) p->device_flags=4;
+        else if(f->read_kind==2) { p->result=1; p->diagnostic_class=5; p->probe_flags=1; }
+        else if(f->read_kind==3) { p->result=3; p->diagnostic_class=1; p->completion_flags=1; p->host_status=0x11; }
+        else if(f->read_kind==4) { p->result=3; p->diagnostic_class=3; }
+        else if(f->read_kind==5) { p->result=2; p->scsi_opcode=0; p->completion_flags=0; }
+        else p->format=1;
+    }
+    if(f->control_guard) ((unsigned char *)p)[sizeof(*p)]=0;
+    return 0;
+}
+static void positions(struct fixture *f,const struct ot_native_ops *base)
+{
+    struct ot_native_position_ops ops;
+    struct ot_tape_position_v1 p;
+    unsigned error,state,kind;
+    const int expected[]={0,OT_NATIVE_PARTIAL,OT_NATIVE_PARTIAL,OT_NATIVE_COMMAND,
+        OT_NATIVE_COMMAND,OT_NATIVE_BUSY,OT_NATIVE_RESPONSE};
+    ops.query=*base; ops.position=positioned;
+    reset(f);
+    assert(ot_native_position(&ops,"drive-A",&p,&error)==OT_NATIVE_UNSUPPORTED);
+    assert(strcmp(f->trace,"OIQC")==0);
+    for(state=0;state<=0x60;state+=0x20) {
+        if(state==0x20) continue;
+        for(kind=0;kind<=6;++kind) {
+            reset(f); f->operations|=OT_TAPE_OP_POSITION; f->session=(oa_u16)state; f->read_kind=kind;
+            assert(ot_native_position(&ops,"drive-A",&p,&error)==expected[kind]);
+            assert(strcmp(f->trace,"OIQPC")==0);
+            if(kind<6) assert(p.session_state==state);
+            if(kind==0) assert(p.first_block==0x89abcdefUL && p.last_block==0xfedcba98UL);
+        }
+    }
+    for(state=1;state<=0x10;state<<=1) {
+        reset(f); f->operations|=OT_TAPE_OP_POSITION; f->session=(oa_u16)state;
+        assert(ot_native_position(&ops,"drive-A",&p,&error)==OT_NATIVE_BUSY && strcmp(f->trace,"OIQC")==0);
+    }
+    reset(f); f->operations|=OT_TAPE_OP_POSITION; f->control_guard=1;
+    assert(ot_native_position(&ops,"drive-A",&p,&error)==OT_NATIVE_RESPONSE && p.size==0);
+    reset(f); f->operations|=OT_TAPE_OP_POSITION; f->control_error=5; f->close_error=53;
+    assert(ot_native_position(&ops,"drive-A",&p,&error)==OT_NATIVE_IOCTL && error==5);
+    reset(f); f->operations|=OT_TAPE_OP_POSITION; f->close_error=53;
+    assert(ot_native_position(&ops,"drive-A",&p,&error)==OT_NATIVE_CLOSE && p.valid_fields==1 && error==53);
+    reset(f); f->operations|=OT_TAPE_OP_POSITION; f->read_kind=3; f->close_error=53;
+    assert(ot_native_position(&ops,"drive-A",&p,&error)==OT_NATIVE_COMMAND && p.completion_flags==1);
+    reset(f); assert(ot_native_position(&ops,"wrong",&p,&error)==OT_NATIVE_ARGUMENT && f->count==0);
+}
+#endif
+
+#ifdef OT_NATIVE_TAPE_LOCATE
+static unsigned located(void *v,struct ot_tape_locate_v1 *p)
+{
+    struct fixture *f=(struct fixture *)v;
+    event(f,'L');
+    if(f->control_error) return f->control_error;
+    p->scsi_opcode=0x2b; p->completion_flags=3;
+    if(f->read_kind==1) { p->result=3; p->diagnostic_class=2; p->session_state=0x40; p->completion_flags=5; }
+    if(f->read_kind==2) p->block^=1;
+    if(f->read_kind==3) p->partition^=1;
+    if(f->read_kind==4) p->flags^=1;
+    if(f->read_kind==5) ((unsigned char *)p)[sizeof(*p)]=0;
+    if(f->read_kind==6) { p->result=2; p->scsi_opcode=0; p->completion_flags=0; }
+    return 0;
+}
+static void locates(struct fixture *f,const struct ot_native_ops *base)
+{
+    struct ot_native_locate_ops ops;
+    struct ot_tape_locate_v1 p;
+    unsigned error,i;
+    const oa_u32 blocks[]={0UL,1UL,65535UL,65536UL,0x7fffffffUL,0x80000000UL,0x89abcdefUL,0xffffffffUL};
+    const unsigned states[]={1,2,4,8,0x10,0x20,0x40,0x60};
+    const int expected[]={0,OT_NATIVE_COMMAND,OT_NATIVE_RESPONSE,OT_NATIVE_RESPONSE,
+        OT_NATIVE_RESPONSE,OT_NATIVE_RESPONSE,OT_NATIVE_BUSY};
+    ops.query=*base; ops.locate=located;
+    reset(f); f->operations|=OT_TAPE_OP_POSITION;
+    assert(ot_native_locate(&ops,"drive-A",0,0,1,&p,&error)==OT_NATIVE_UNSUPPORTED && strcmp(f->trace,"OIQC")==0);
+    for(i=0;i<8;++i) {
+        reset(f); f->operations|=OT_TAPE_OP_LOCATE;
+        assert(ot_native_locate(&ops,"drive-A",(oa_u16)(i&1),i&1 ? 255UL : 0UL,blocks[i],&p,&error)==0);
+        assert(p.block==blocks[i] && p.completion_flags==3 && strcmp(f->trace,"OIQLC")==0);
+        reset(f); f->operations|=OT_TAPE_OP_LOCATE; f->session=(oa_u16)states[i];
+        assert(ot_native_locate(&ops,"drive-A",0,0,1,&p,&error)==OT_NATIVE_BUSY && strcmp(f->trace,"OIQC")==0);
+    }
+    for(i=0;i<7;++i) {
+        reset(f); f->operations|=OT_TAPE_OP_LOCATE; f->read_kind=i;
+        assert(ot_native_locate(&ops,"drive-A",1,2,0xffffffffUL,&p,&error)==expected[i]);
+        assert(strcmp(f->trace,"OIQLC")==0);
+    }
+    reset(f);
+    assert(ot_native_locate(&ops,"drive-A",2,0,1,&p,&error)==OT_NATIVE_ARGUMENT && f->count==0);
+    assert(ot_native_locate(&ops,"drive-A",0,1,1,&p,&error)==OT_NATIVE_ARGUMENT && f->count==0);
+    assert(ot_native_locate(&ops,"drive-A",1,256,1,&p,&error)==OT_NATIVE_ARGUMENT && f->count==0);
+    reset(f); f->operations|=OT_TAPE_OP_LOCATE; f->control_error=5; f->close_error=53;
+    assert(ot_native_locate(&ops,"drive-A",0,0,1,&p,&error)==OT_NATIVE_IOCTL && error==5);
+    reset(f); f->operations|=OT_TAPE_OP_LOCATE; f->close_error=53;
+    assert(ot_native_locate(&ops,"drive-A",0,0,1,&p,&error)==OT_NATIVE_CLOSE && p.block==1 && error==53);
+    reset(f); f->operations|=OT_TAPE_OP_LOCATE; f->read_kind=1; f->close_error=53;
+    assert(ot_native_locate(&ops,"drive-A",0,0,1,&p,&error)==OT_NATIVE_COMMAND && p.session_state==0x40);
+}
+#endif
+
+#ifdef OT_NATIVE_TAPE_WIDE
+static unsigned wide_positioned(void *v,struct ot_tape_position64_v1 *p)
+{
+    struct fixture *f=(struct fixture *)v;
+    event(f,'P'); p->scsi_opcode=0x34; p->completion_flags=3; p->session_state=f->session;
+    p->valid_fields=3; p->partition=255; p->block=0x89abcdefUL; p->block_high=0xfedcba98UL;
+    p->file=7; p->file_high=1;
+    if(f->read_kind) {
+        p->valid_fields=0; p->partition=p->block=p->block_high=p->file=p->file_high=0;
+        if(f->read_kind==1) { p->device_flags=4; p->valid_fields=2; p->file=3; }
+        if(f->read_kind==2) { p->device_flags=8; p->valid_fields=1; p->block_high=1; }
+        if(f->read_kind==3) p->device_flags=12;
+        if(f->read_kind==4) { p->result=1; p->diagnostic_class=5; p->probe_flags=1; }
+        if(f->read_kind==5) { p->result=3; p->diagnostic_class=3; }
+        if(f->read_kind==6) { p->result=3; p->diagnostic_class=4; p->completion_flags=1; }
+        if(f->read_kind==7) p->format=2;
+        if(f->read_kind==8) ((unsigned char *)p)[sizeof(*p)]=0;
+    }
+    return 0;
+}
+static unsigned wide_located(void *v,struct ot_tape_locate64_v1 *p)
+{
+    struct fixture *f=(struct fixture *)v;
+    event(f,'L'); p->scsi_opcode=0x92; p->completion_flags=3;
+    if(f->read_kind==1) ++p->block_high;
+    if(f->read_kind==2) { p->result=3; p->diagnostic_class=2; p->session_state=0x40; p->completion_flags=5; }
+    if(f->read_kind==3) ((unsigned char *)p)[sizeof(*p)]=0;
+    return 0;
+}
+static void wides(struct fixture *f,const struct ot_native_ops *base)
+{
+    struct ot_native_position64_ops po;
+    struct ot_native_locate64_ops lo;
+    struct ot_tape_position64_v1 p;
+    struct ot_tape_locate64_v1 l;
+    const int expected[]={0,OT_NATIVE_PARTIAL,0,OT_NATIVE_PARTIAL,OT_NATIVE_PARTIAL,
+        OT_NATIVE_COMMAND,OT_NATIVE_COMMAND,OT_NATIVE_RESPONSE,OT_NATIVE_RESPONSE};
+    unsigned i,error;
+    po.query=*base; po.position=wide_positioned; lo.query=*base; lo.locate=wide_located;
+    reset(f); f->operations|=OT_TAPE_OP_POSITION|OT_TAPE_OP_LOCATE;
+    assert(ot_native_position64(&po,"drive-A",&p,&error)==OT_NATIVE_UNSUPPORTED);
+    assert(ot_native_locate64(&lo,"drive-A",0,0,0,1,&l,&error)==OT_NATIVE_UNSUPPORTED);
+    for(i=0;i<9;++i) {
+        reset(f); f->operations|=OT_TAPE_OP_POSITION64; f->read_kind=i; f->session=0x60;
+        assert(ot_native_position64(&po,"drive-A",&p,&error)==expected[i]);
+        if(i<7) assert(p.session_state==0x60);
+        assert(strcmp(f->trace,"OIQPC")==0);
+    }
+    reset(f); f->operations|=OT_TAPE_OP_LOCATE64;
+    assert(ot_native_locate64(&lo,"drive-A",1,255,0xffffffffUL,0xffffffffUL,&l,&error)==0 && l.block_high==0xffffffffUL);
+    for(i=1;i<=3;++i) {
+        reset(f); f->operations|=OT_TAPE_OP_LOCATE64; f->read_kind=i;
+        assert(ot_native_locate64(&lo,"drive-A",0,0,0,1,&l,&error)==(i==2 ? OT_NATIVE_COMMAND : OT_NATIVE_RESPONSE));
+    }
+    reset(f); f->operations|=OT_TAPE_OP_LOCATE64; f->session=0x40;
+    assert(ot_native_locate64(&lo,"drive-A",0,0,0,1,&l,&error)==OT_NATIVE_BUSY && strcmp(f->trace,"OIQC")==0);
+}
+#endif
+
+#ifdef OT_NATIVE_TAPE_PARTITIONS
+static unsigned partitioned(void *v,struct ot_tape_partitions_v1 *p)
+{
+    struct fixture *f=(struct fixture *)v;
+    event(f,'P');
+    if(f->control_error) return f->control_error;
+    p->scsi_opcode=0x1a; p->completion_flags=3; p->valid_fields=1;
+    p->session_state=f->session; p->maximum_additional=0; p->defined_additional=255;
+    if(f->read_kind) {
+        p->valid_fields=0; p->maximum_additional=p->defined_additional=0;
+        if(f->read_kind==1) p->result=0; /* OK without valid layout is malformed */
+        else if(f->read_kind==2) { p->result=1; p->diagnostic_class=5; p->probe_flags=1; }
+        else if(f->read_kind==3) { p->result=3; p->diagnostic_class=1; p->completion_flags=1; p->host_status=0x11; }
+        else if(f->read_kind==4) { p->result=3; p->diagnostic_class=3; }
+        else if(f->read_kind==5) { p->result=2; p->scsi_opcode=0; p->completion_flags=0; }
+        else p->format=1;
+    }
+    if(f->control_guard) ((unsigned char *)p)[sizeof(*p)]=0;
+    return 0;
+}
+static void partitions(struct fixture *f,const struct ot_native_ops *base)
+{
+    struct ot_native_partitions_ops ops;
+    struct ot_tape_partitions_v1 p;
+    unsigned error,state,kind;
+    const int expected[]={0,OT_NATIVE_RESPONSE,OT_NATIVE_PARTIAL,OT_NATIVE_COMMAND,
+        OT_NATIVE_COMMAND,OT_NATIVE_BUSY,OT_NATIVE_RESPONSE};
+    ops.query=*base; ops.partitions=partitioned;
+    reset(f);
+    assert(ot_native_partitions(&ops,"drive-A",&p,&error)==OT_NATIVE_UNSUPPORTED);
+    assert(strcmp(f->trace,"OIQC")==0);
+    for(state=0;state<=0x60;state+=0x20) {
+        if(state==0x20) continue;
+        for(kind=0;kind<=6;++kind) {
+            reset(f); f->operations|=OT_TAPE_OP_PARTITIONS; f->session=(oa_u16)state; f->read_kind=kind;
+            assert(ot_native_partitions(&ops,"drive-A",&p,&error)==expected[kind]);
+            assert(strcmp(f->trace,"OIQPC")==0);
+            if(kind<6 && kind!=1) assert(p.session_state==state);
+            if(kind==0) assert(p.maximum_additional==0 && p.defined_additional==255);
+        }
+    }
+    for(state=1;state<=0x10;state<<=1) {
+        reset(f); f->operations|=OT_TAPE_OP_PARTITIONS; f->session=(oa_u16)state;
+        assert(ot_native_partitions(&ops,"drive-A",&p,&error)==OT_NATIVE_BUSY && strcmp(f->trace,"OIQC")==0);
+    }
+    reset(f); f->operations|=OT_TAPE_OP_PARTITIONS; f->control_guard=1;
+    assert(ot_native_partitions(&ops,"drive-A",&p,&error)==OT_NATIVE_RESPONSE && p.size==0);
+    reset(f); f->operations|=OT_TAPE_OP_PARTITIONS; f->control_error=5; f->close_error=53;
+    assert(ot_native_partitions(&ops,"drive-A",&p,&error)==OT_NATIVE_IOCTL && error==5);
+    reset(f); f->operations|=OT_TAPE_OP_PARTITIONS; f->close_error=53;
+    assert(ot_native_partitions(&ops,"drive-A",&p,&error)==OT_NATIVE_CLOSE && p.valid_fields==1 && error==53);
+    reset(f); f->operations|=OT_TAPE_OP_PARTITIONS; f->read_kind=3; f->close_error=53;
+    assert(ot_native_partitions(&ops,"drive-A",&p,&error)==OT_NATIVE_COMMAND && p.completion_flags==1);
+    reset(f); assert(ot_native_partitions(&ops,"wrong",&p,&error)==OT_NATIVE_ARGUMENT && f->count==0);
+}
+#endif
+
+
+/* Signed decimal input is shared by CLI and UI. Never publish a shortened or
+ * wrapped count after invalid input, including arbitrarily long digit strings. */
+#ifdef OT_NATIVE_TAPE_EXTENDED_SPACE
+/* Individual capability bits, old media enums in the gap, and submitted
+ * failures are checked independently of the UI/CDB fixture mapping. */
+static void extended_spaces(struct fixture *f,const struct ot_native_control_ops *ops)
+{
+    struct ot_tape_control_v1 c;
+    const oa_u32 bits[]={OT_TAPE_OP_SPACE_SEQ_FILEMARKS,OT_TAPE_OP_SPACE_SETMARKS,OT_TAPE_OP_SPACE_SEQ_SETMARKS};
+    const oa_s32 counts[]={1,-1,8388607L,-8388608L,0};
+    unsigned op,i,state,error;
+    for(op=14;op<=16;++op) {
+        assert(ot_native_space_operation((oa_u16)op));
+        for(i=0;i<5;++i) {
+            reset(f); f->operations=OT_TAPE_OP_QUERY|bits[op-14];
+            assert(ot_native_space(ops,"drive-A",(oa_u16)op,counts[i],&c,&error)==0);
+            assert(c.scsi_opcode==0x11 && c.count==counts[i] && c.completion_flags==3);
+            assert(strcmp(f->trace,"OIQXC")==0);
+        }
+        reset(f); f->operations=0x3ffffffUL & ~bits[op-14];
+        assert(ot_native_space(ops,"drive-A",(oa_u16)op,1,&c,&error)==OT_NATIVE_UNSUPPORTED);
+        assert(strcmp(f->trace,"OIQC")==0);
+        for(state=1;state<=0x40;state<<=1) {
+            reset(f); f->operations|=bits[op-14]; f->session=(oa_u16)state;
+            assert(ot_native_space(ops,"drive-A",(oa_u16)op,-1,&c,&error)==OT_NATIVE_BUSY);
+            assert(strcmp(f->trace,"OIQC")==0);
+        }
+        reset(f); f->operations|=bits[op-14]; f->control_result=3; f->close_error=53;
+        assert(ot_native_space(ops,"drive-A",(oa_u16)op,1,&c,&error)==OT_NATIVE_COMMAND);
+        assert(c.session_state==0x40 && c.completion_flags==5 && error==0);
+        reset(f); f->operations|=bits[op-14]; f->count_mismatch=1;
+        assert(ot_native_space(ops,"drive-A",(oa_u16)op,1,&c,&error)==OT_NATIVE_RESPONSE && c.size==0);
+        reset(f); f->operations|=bits[op-14]; f->control_guard=1;
+        assert(ot_native_space(ops,"drive-A",(oa_u16)op,1,&c,&error)==OT_NATIVE_RESPONSE && c.size==0);
+        reset(f);
+        assert(ot_native_execute(ops,"drive-A",(oa_u16)op,&c,&error)==OT_NATIVE_ARGUMENT && f->count==0);
+    }
+    for(op=10;op<=13;++op) assert(!ot_native_space_operation((oa_u16)op));
+}
+#endif
+
+static void space_count_input(void)
+{
+    static const char *bad[]={"", "-", "+1", " 1", "1 ", "1-", "--1", "1a", "8388608", "-8388609",
+        "999999999999999999999999999999999999999999999999999"};
+    unsigned i;
+    oa_s32 n=123;
+    assert(ot_native_space_count_parse(0,&n)==-1 && n==123);
+    assert(ot_native_space_count_parse("1",0)==-1);
+    for(i=0;i<sizeof(bad)/sizeof(bad[0]);++i)
+        assert(ot_native_space_count_parse(bad[i],&n)==-1 && n==123);
+    assert(ot_native_space_count_parse("8388607",&n)==0 && n==8388607L);
+    assert(ot_native_space_count_parse("-8388608",&n)==0 && n==(-8388607L-1L));
+    assert(ot_native_space_count_parse("-1",&n)==0 && n==-1L);
+    assert(ot_native_space_count_parse("0",&n)==0 && n==0);
+    assert(ot_native_space_count_parse("-0",&n)==0 && n==0);
+    assert(ot_native_space_count_parse("00000000000000001",&n)==0 && n==1);
+}
+
+#ifdef OT_TAPE_STREAM_SETMARK
+static void setmark_readers(struct fixture *f,const struct ot_native_ops *base)
+{
+    struct ot_native_reader_ops ops;
+    struct ot_native_reader n;
+    unsigned char data[8];
+    unsigned kind;
+    const int expected[]={OT_NATIVE_STREAM,OT_NATIVE_STREAM,OT_NATIVE_RESPONSE,OT_NATIVE_COMMAND,
+        OT_NATIVE_RESPONSE,OT_NATIVE_RESPONSE,OT_NATIVE_RESPONSE};
+    ops.query=*base; ops.read=read_record;
+    for(kind=8;kind<=14;++kind) {
+        reset(f); f->operations|=OT_TAPE_OP_READ|OT_TAPE_OP_READ_SETMARK; f->read_kind=kind;
+        memset(&n,0,sizeof(n)); assert(ot_native_reader_open(&n,&ops,"drive-A")==0);
+        assert(ot_native_reader_read(&n,data,8)==expected[kind-8]);
+        if(kind<=9) {
+            assert(!n.failed && n.last.stream_flags==0x48);
+            assert(ot_native_reader_read(&n,data,8)==OT_NATIVE_STREAM);
+        } else {
+            assert(n.failed && ot_native_reader_read(&n,data,8)==OT_NATIVE_COMMAND);
+            if(kind!=11) assert(n.last.size==0);
+        }
+        assert(ot_native_reader_close(&n)==0);
+        assert(strcmp(f->trace,kind<=9 ? "OIQRRC" : "OIQRC")==0);
+    }
+}
+#endif
+
+#ifdef OT_NATIVE_TAPE_WRITE_SETMARK
+/* Keep setmark submission distinct from data writes and filemark callbacks.
+ * Provider rejection occurs before a command; target rejection is a failed
+ * claimed/dirty writer, with its first diagnostic preserved through cleanup. */
+static unsigned setmark_controlled(void *v,struct ot_tape_control_v1 *p)
+{
+    struct fixture *f=(struct fixture *)v;
+    if(p->operation!=OT_TAPE_CONTROL_SETMARK) return writer_controlled(v,p);
+    event(f,'S'); assert(p->flags==0 && p->count==0 && p->block_size==0);
+    if(f->control_error) return f->control_error;
+    f->session|=OT_TAPE_SESSION_NATIVE_DIRTY;
+    p->scsi_opcode=0x10; p->completion_flags=3;
+    if(f->control_result) {
+        f->session|=OT_TAPE_SESSION_NATIVE_FAILED; p->result=3; p->completion_flags=5;
+        p->diagnostic_class=4; p->target_status=2; p->sense_response=0x70; p->sense_key=5; p->asc=0x20;
+    }
+    p->session_state=f->session;
+    if(f->count_mismatch) p->count=1;
+    if(f->mismatch) p->operation=OT_TAPE_CONTROL_FILEMARK;
+    if(f->bad_control) p->session_state&=~OT_TAPE_SESSION_NATIVE_DIRTY;
+    if(f->control_guard) ((unsigned char *)p)[sizeof(*p)]=0;
+    return 0;
+}
+static void setmark_writers(struct fixture *f,const struct ot_native_ops *base)
+{
+    struct ot_native_writer_ops ops;
+    struct ot_native_writer w;
+    struct ot_tape_control_v1 saved;
+    unsigned mode,kind;
+    const int expected[]={OT_NATIVE_COMMAND,OT_NATIVE_IOCTL,OT_NATIVE_RESPONSE,
+        OT_NATIVE_RESPONSE,OT_NATIVE_RESPONSE,OT_NATIVE_RESPONSE};
+    ops.control.query=*base; ops.control.control=setmark_controlled;
+    ops.open_write=opened; ops.write=write_record;
+    assert(ot_native_writer_setmark(0)==OT_NATIVE_ARGUMENT);
+    memset(&w,0,sizeof(w)); assert(ot_native_writer_setmark(&w)==OT_NATIVE_ARGUMENT);
+    for(mode=0;mode<2;++mode) {
+        reset(f); f->operations=0x7ffUL; memset(&w,0,sizeof(w));
+        assert((mode ? ot_native_writer_open_fixed(&w,&ops,"drive-A",512) : ot_native_writer_open(&w,&ops,"drive-A"))==0);
+        saved=w.last_control;
+        assert(ot_native_writer_setmark(&w)==OT_NATIVE_UNSUPPORTED && !w.failure && w.claimed);
+        assert(memcmp(&saved,&w.last_control,sizeof(saved))==0 && strcmp(f->trace,"OIQB")==0);
+        assert(ot_native_writer_finish(&w)==0 && ot_native_writer_close(&w)==0);
+        assert(strcmp(f->trace,"OIQBEC")==0);
+        reset(f); f->operations=0x7ffUL|OT_TAPE_OP_SETMARK; memset(&w,0,sizeof(w));
+        assert((mode ? ot_native_writer_open_fixed(&w,&ops,"drive-A",512) : ot_native_writer_open(&w,&ops,"drive-A"))==0);
+        f->operations=0; /* Use the captured capability; no extra query. */
+        assert(ot_native_writer_setmark(&w)==0 && w.last_control.session_state==0x30 && w.claimed);
+        assert(ot_native_writer_setmark(&w)==0 && w.last_control.session_state==0x30);
+        assert(ot_native_writer_finish(&w)==0 && ot_native_writer_close(&w)==0);
+        assert(strcmp(f->trace,"OIQBSSEC")==0);
+    }
+    for(kind=0;kind<6;++kind) {
+        reset(f); f->operations=0x7ffUL|OT_TAPE_OP_SETMARK; memset(&w,0,sizeof(w));
+        assert(ot_native_writer_open(&w,&ops,"drive-A")==0);
+        if(kind==0) f->control_result=3;
+        if(kind==1) f->control_error=5;
+        if(kind==2) f->count_mismatch=1;
+        if(kind==3) f->mismatch=1;
+        if(kind==4) f->bad_control=1;
+        if(kind==5) f->control_guard=1;
+        assert(ot_native_writer_setmark(&w)==expected[kind] && w.failure==expected[kind]);
+        saved=w.last_control;
+        assert(ot_native_writer_setmark(&w)==expected[kind]);
+        assert(ot_native_writer_filemark(&w)==expected[kind] && ot_native_writer_flush(&w)==expected[kind]);
+        assert(ot_native_writer_finish(&w)==expected[kind]);
+        f->close_error=53;
+        assert(ot_native_writer_close(&w)==expected[kind]);
+        assert(memcmp(&saved,&w.last_control,sizeof(saved))==0);
+        assert(strcmp(f->trace,"OIQBSAC")==0);
+    }
+}
+#endif
+
+#ifdef OT_NATIVE_TAPE_ALERTS
+static unsigned alerted(void *v,struct ot_tape_alerts_v1 *p)
+{
+    struct fixture *f=(struct fixture *)v;
+    event(f,'P');
+    if(f->control_error) return f->control_error;
+    p->scsi_opcode=0x4d; p->completion_flags=3; p->valid_fields=1;
+    p->session_state=f->session; p->reported_low=0x80080001UL; p->active_low=0x80080000UL; p->reported_high=p->active_high=0x80000000UL;
+    if(f->read_kind) {
+        p->valid_fields=0; p->reported_low=p->reported_high=p->active_low=p->active_high=0;
+        if(f->read_kind==1) p->result=0; /* OK without valid layout is malformed */
+        else if(f->read_kind==2) { p->result=1; p->diagnostic_class=5; p->probe_flags=1; }
+        else if(f->read_kind==3) { p->result=3; p->diagnostic_class=1; p->completion_flags=1; p->host_status=0x11; }
+        else if(f->read_kind==4) { p->result=3; p->diagnostic_class=3; }
+        else if(f->read_kind==5) { p->result=2; p->scsi_opcode=0; p->completion_flags=0; }
+        else p->format=1;
+    }
+    if(f->control_guard) ((unsigned char *)p)[sizeof(*p)]=0;
+    return 0;
+}
+static void alerts_tests(struct fixture *f,const struct ot_native_ops *base)
+{
+    struct ot_native_alerts_ops ops;
+    struct ot_tape_alerts_v1 p;
+    unsigned error,state,kind;
+    const int expected[]={0,OT_NATIVE_RESPONSE,OT_NATIVE_PARTIAL,OT_NATIVE_COMMAND,
+        OT_NATIVE_COMMAND,OT_NATIVE_BUSY,OT_NATIVE_RESPONSE};
+    ops.query=*base; ops.alerts=alerted;
+    reset(f);
+    assert(ot_native_alerts(&ops,"drive-A",0,&p,&error)==OT_NATIVE_ARGUMENT && f->count==0);
+    assert(ot_native_alerts(&ops,"drive-A",1,&p,&error)==OT_NATIVE_UNSUPPORTED);
+    assert(strcmp(f->trace,"OIQC")==0);
+    for(state=0;state<=0x60;state+=0x20) {
+        if(state==0x20) continue;
+        for(kind=0;kind<=6;++kind) {
+            reset(f); f->operations|=OT_TAPE_OP_ALERTS; f->session=(oa_u16)state; f->read_kind=kind;
+            assert(ot_native_alerts(&ops,"drive-A",1,&p,&error)==expected[kind]);
+            assert(strcmp(f->trace,"OIQPC")==0);
+            if(kind<6 && kind!=1) assert(p.session_state==state);
+            if(kind==0) assert(ot_tape_alert_state(&p,64)==1 && ot_tape_alert_state(&p,1)==0);
+        }
+    }
+    for(state=1;state<=0x10;state<<=1) {
+        reset(f); f->operations|=OT_TAPE_OP_ALERTS; f->session=(oa_u16)state;
+        assert(ot_native_alerts(&ops,"drive-A",1,&p,&error)==OT_NATIVE_BUSY && strcmp(f->trace,"OIQC")==0);
+    }
+    reset(f); f->operations|=OT_TAPE_OP_ALERTS; f->control_guard=1;
+    assert(ot_native_alerts(&ops,"drive-A",1,&p,&error)==OT_NATIVE_RESPONSE && p.size==0);
+    reset(f); f->operations|=OT_TAPE_OP_ALERTS; f->control_error=5; f->close_error=53;
+    assert(ot_native_alerts(&ops,"drive-A",1,&p,&error)==OT_NATIVE_IOCTL && error==5);
+    reset(f); f->operations|=OT_TAPE_OP_ALERTS; f->close_error=53;
+    assert(ot_native_alerts(&ops,"drive-A",1,&p,&error)==OT_NATIVE_CLOSE && p.valid_fields==1 && error==53);
+    reset(f); f->operations|=OT_TAPE_OP_ALERTS; f->read_kind=3; f->close_error=53;
+    assert(ot_native_alerts(&ops,"drive-A",1,&p,&error)==OT_NATIVE_COMMAND && p.completion_flags==1);
+    reset(f); assert(ot_native_alerts(&ops,"wrong",1,&p,&error)==OT_NATIVE_ARGUMENT && f->count==0);
+}
+#endif
 int main(void)
 {
     struct fixture f;
@@ -495,6 +964,31 @@ int main(void)
     fixed_sessions(&f,&ops.query);
     spaces(&f, &ops);
     media(&f, &ops);
+#ifdef OT_NATIVE_TAPE_POSITION
+    positions(&f,&ops.query);
+#endif
+#ifdef OT_NATIVE_TAPE_LOCATE
+    locates(&f,&ops.query);
+#endif
+#ifdef OT_NATIVE_TAPE_WIDE
+    wides(&f,&ops.query);
+#endif
+#ifdef OT_NATIVE_TAPE_PARTITIONS
+    partitions(&f,&ops.query);
+#endif
+#ifdef OT_NATIVE_TAPE_EXTENDED_SPACE
+    extended_spaces(&f,&ops);
+#endif
+#ifdef OT_TAPE_STREAM_SETMARK
+    setmark_readers(&f,&ops.query);
+#endif
+#ifdef OT_NATIVE_TAPE_WRITE_SETMARK
+    setmark_writers(&f,&ops.query);
+#endif
+#ifdef OT_NATIVE_TAPE_ALERTS
+    alerts_tests(&f,&ops.query);
+#endif
+    space_count_input();
     puts("OpenTape native API lifecycle/guard/control/record/writer/fixed tests passed");
     return 0;
 }

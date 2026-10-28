@@ -14,6 +14,17 @@ static int same_path(const char *a, const char *b)
     return 1;
 }
 
+/* A regular file cannot be an ancestor of another archive object. Match
+ * complete components and ASCII case, so DATA/A never conflicts with DATA/AB. */
+static int parent_path(const char *parent, const char *path)
+{
+    unsigned n = (unsigned)strlen(parent);
+    char prefix[OT_FILE_PATH_MAX + 1u];
+    if (strlen(path) <= n || path[n] != '/') return 0;
+    memcpy(prefix, path, n); prefix[n] = 0;
+    return same_path(parent, prefix);
+}
+
 int ot_plan_add(struct ot_backup_plan *p, const char *name, const struct ot_file_metadata *m)
 {
     struct ot_plan_entry *e;
@@ -23,7 +34,9 @@ int ot_plan_add(struct ot_backup_plan *p, const char *name, const struct ot_file
         ot_file_metadata_encode(encoded, sizeof(encoded), m, &n) != 0) return OT_SOURCE_ARGUMENT;
     if (p->count >= OT_PLAN_MAX_ENTRIES) return OT_PLAN_LIMIT;
     for (e = p->first; e != 0; e = e->next)
-        if (same_path(e->metadata.path, m->path)) return OT_PLAN_DUPLICATE;
+        if (same_path(e->metadata.path, m->path) ||
+            (e->metadata.kind == OT_FILE_REGULAR && parent_path(e->metadata.path, m->path)) ||
+            (m->kind == OT_FILE_REGULAR && parent_path(m->path, e->metadata.path))) return OT_PLAN_DUPLICATE;
     e = malloc(sizeof(*e));
     if (e == 0) return OT_PLAN_LIMIT;
     e->next = 0;

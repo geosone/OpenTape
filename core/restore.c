@@ -38,6 +38,14 @@ int ot_restore_init(struct ot_restore *s, const struct ot_restore_ops *ops)
     memset(s, 0, sizeof(*s)); s->ops = ops;
     return 0;
 }
+int ot_restore_observe(struct ot_restore *s, ot_restore_observer observer, void *context)
+{
+    if (s == 0 || s->ops == 0) return OT_FORMAT_BAD_ARGUMENT;
+    if (s->failed || s->finished || s->busy) return OT_RESTORE_FAILED;
+    if (s->verified.framing.blocks != 0ul) return OT_FORMAT_BAD_ARGUMENT;
+    s->observer = observer; s->observer_context = context;
+    return 0;
+}
 int ot_restore_block(struct ot_restore *s, const oa_u8 *block, oa_u16 size)
 {
     struct ot_archive_verify next;
@@ -45,13 +53,15 @@ int ot_restore_block(struct ot_restore *s, const oa_u8 *block, oa_u16 size)
     struct ot_file_metadata m;
     oa_u16 offset, i;
     unsigned error = 0u, accepted, selected;
+    oa_u32 checked_low, checked_high, before, file_bytes;
     int rc;
     if (s == 0 || s->ops == 0 || block == 0) return OT_FORMAT_BAD_ARGUMENT;
     if (s->failed || s->finished || s->busy) return OT_RESTORE_FAILED;
     next = s->verified;
     rc = ot_archive_verify_block(&next, block, size);
     if (rc != 0) { s->failed = 1u; return rc; }
-    /* Validate the entire physical block before invoking any output callback. */
+    checked_low = s->checked_low; checked_high = s->checked_high; file_bytes = s->active_bytes;
+    /* Validate the complete OTB1 block before invoking any output callback. */
     s->busy = 1u;
     offset = OT_BLOCK_HEADER_SIZE;
     for (i = 0u; i < next.framing.last_block.record_count; ++i) {
@@ -68,7 +78,7 @@ int ot_restore_block(struct ot_restore *s, const oa_u8 *block, oa_u16 size)
                 }
             }
             else {
-                s->active = m;
+                s->active = m; file_bytes = 0ul;
                 selected = s->filter_enabled ? ot_restore_selected(s->filter, s->filter_count, m.path) : 0u;
                 s->excluding = s->filter_enabled && selected == 0u;
                 if (selected != 0u) s->filter_seen[selected - 1u] = 1u;
@@ -98,11 +108,20 @@ int ot_restore_block(struct ot_restore *s, const oa_u8 *block, oa_u16 size)
             }
         }
         if (error != 0u) { rc = OT_RESTORE_IO; break; }
+        if (r.type == OT_RECORD_FILE_DATA) {
+            before = checked_low; checked_low += r.data_size; file_bytes += r.data_size;
+            if (checked_low < before) ++checked_high;
+        }
         offset = (oa_u16)(offset + (oa_u16)r.data_size);
     }
     s->busy = 0u;
     if (rc != 0) { s->failed = 1u; s->backend_error = error; return rc; }
-    s->verified = next;
+    s->verified = next; s->checked_low = checked_low; s->checked_high = checked_high; s->active_bytes = file_bytes;
+    if (s->observer != 0) {
+        s->busy = 1u;
+        s->observer(s->observer_context, s);
+        s->busy = 0u;
+    }
     return 0;
 }
 int ot_restore_finish(struct ot_restore *s)

@@ -5,7 +5,8 @@ OPENTAPE --ui --device NRMT0 --selection-out C:\LISTS\PICKED.LST
 ```
 
 Load verified contents with L (explicitly rewind with R first when needed),
-mark files using Space/A/N, then press E. The question shows the marked-file
+mark files using Space/Enter/A/N (or Enter on a directory for its descendant
+files), then press E. The question shows the marked-file
 count and exact configured output spelling. Only Y in English or J in German
 (either case) saves. Every other key cancels and is consumed: Enter never
 confirms, Esc does not also leave the view, and selection/navigation keys do
@@ -15,9 +16,13 @@ tape I/O. Export does not read or reposition tape.
 The output option is optional and accepts at most 40 characters so the whole
 target fits the confirmation screen. Either option order is supported; repeated,
 missing or overlong options fail before opening the UI. Relative names resolve
-against the current DOS directory. There is initially no filename editor.
-Without an output option, E only explains how to configure it. Empty marks
+against the current DOS directory. Without an output option or a name saved
+with P, E only explains how to configure it. Empty marks
 cannot create an empty list.
+
+The output filename can also be configured with **P** in the
+[path-settings editor](catalog-paths-ui.md); saving a filename does not create
+or overwrite a file. E retains its separate confirmation and new-file policy.
 
 ## Exact paths, not replacement permission
 
@@ -62,6 +67,15 @@ inspection; `rc=-130 DOS=80` commonly means the destination or staging file
 already exists. After a write/close/rename error, inspect `OT$LIST.TMP` in the
 target directory: it may remain for recovery. Do not delete unrelated files.
 Esc's normal exit code does not summarize a previously displayed export error.
+
+Replacement intent from O is never encoded in this export. E continues to
+export all marked regular-file paths in catalogue order. An exported path list
+grants replacement only if the user later explicitly chooses it as a CLI
+`--replace-list`; review it for that purpose independently of GUI grant flags.
+
+The [I import action](catalog-selection-import.md) can read this path-list format
+back into an already verified catalogue. It atomically replaces extraction marks
+and clears O grants only on success; unknown or ambiguous paths leave them intact.
 
 ## Tests and limits
 

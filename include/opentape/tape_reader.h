@@ -31,6 +31,8 @@ struct ot_tape_reader {
     int (*backend_read)(struct ot_tape_reader *, void *, unsigned, unsigned *);
     int (*backend_close)(struct ot_tape_reader *);
     unsigned pending_filemark;
+    /* Public read/close and stream reentry are blocked during observation. */
+    unsigned observing;
     /* Optional caller-owned workspace for archive backend framing. */
     oa_u8 *backend_buffer;
     unsigned backend_capacity;

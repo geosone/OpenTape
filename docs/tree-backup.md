@@ -74,3 +74,13 @@ empty files produce 46 entries, 43 files and 95 native records. A separate boot
 requires plain `--verify` to stop with exit `3`, while the final `--all` boot
 must reach the filemark and complete. Large-run directories have the `-large`
 suffix, leaving earlier small-fixture logs separate.
+
+The [DOS device-screen B dialog](dos-backup-ui.md) exposes this same source
+and output path with `--ui` configuration and a fresh write confirmation for
+each batch. It does not rewind or perform automatic readback.
+
+
+For interactive source planning, [F7 preflight](backup-preflight.md) reuses the
+same bounded tree builder and reports complete counts/payload size without
+opening tape. Failed/partial plans expose no totals. The later confirmed backup
+always constructs its own fresh plan; the preview does not reserve a snapshot.

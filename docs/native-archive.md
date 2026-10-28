@@ -147,3 +147,10 @@ native API and can receive a direct implementation or a verified portable
 emulation, with provenance/support reported. Those three categories remain
 separate; no optional-function emulation or runtime quirk is enabled by the UI
 work.
+
+A classified native SETMARK is not an OTB1 delimiter. Variable and fixed
+readers fail that archive read without accepting bytes or queuing FILEMARK,
+including a mark delivered alongside a complete final data block. Raw native
+SDK clients can still observe the typed event and count. Host and DOS CLI
+tests verify that a valid session followed by a setmark cannot pass as a
+filemark-terminated archive.

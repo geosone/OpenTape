@@ -53,16 +53,22 @@ int ot_dos_archive_output_open(struct ot_tape_output *o, const char *name, unsig
     if (rc != 0) (void)ot_dos_native_writer_close(&native_writer);
     return rc;
 }
-int ot_dos_archive_verify(const char *name, oa_u8 *buffer, unsigned capacity,
-                           ot_metadata_visitor visitor, void *context, struct ot_verify_session_result *result)
+int ot_dos_archive_verify_observed(const char *name, oa_u8 *buffer, unsigned capacity,
+                           ot_metadata_visitor visitor, void *context, ot_verify_observer observer, void *observer_context, struct ot_verify_session_result *result)
 {
     int rc;
-    if (!selected_native) return ot_verify_session(ot_dos_reader_ops(), name, buffer, capacity, visitor, context, result);
+    if (!selected_native) return ot_verify_session_observed(ot_dos_reader_ops(), name, buffer, capacity, visitor, context, observer, observer_context, result);
     if (result == 0) return OT_READ_BAD_ARGUMENT;
     memset(result, 0, sizeof(*result));
     result->transport_error = 1u;
     if (buffer == 0 || capacity < 2u || (oa_u32)capacity > 65535UL) return OT_READ_BAD_ARGUMENT;
     rc = ot_dos_archive_reader_open(&result->reader, name);
     if (rc != 0) return rc;
-    return ot_verify_session_opened(buffer, capacity, visitor, context, result);
+    return ot_verify_session_opened_observed(buffer, capacity, visitor, context, observer, observer_context, result);
+}
+
+int ot_dos_archive_verify(const char *name, oa_u8 *buffer, unsigned capacity,
+                           ot_metadata_visitor visitor, void *context, struct ot_verify_session_result *result)
+{
+    return ot_dos_archive_verify_observed(name, buffer, capacity, visitor, context, 0, 0, result);
 }

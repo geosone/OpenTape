@@ -76,3 +76,9 @@ in-place source data, corruption after output, exact/short/error/invalid-count
 callbacks, finalization errors and blocked reentrancy/replays. A host-only test
 roundtrips a maximum 65,535-byte physical block with guard bytes and all byte
 values in file data. These are memory/codec tests, not tape-write qualification.
+
+
+The optional [backup progress observer](backup-progress.md) receives committed
+records after exact sink acceptance, with reentry blocked. It does not change
+record bytes, transport policy or finalization, and is attached only before the
+first record. Failed/short writes do not generate accepted-record notifications.

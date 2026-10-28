@@ -69,3 +69,7 @@ This replaces the previous native test fixture on OA2101L8. The fixed eleven-
 record `TAPETEST` readback requires rewriting its own fixture first. Physical
 drive qualification, end-of-media handling, unrestricted multi-root selection,
 catalogue rebuild and general recovery remain separate tasks.
+
+The [DOS device-screen B dialog](dos-backup-ui.md) exposes this same source
+and output path with `--ui` configuration and a fresh write confirmation for
+each batch. It does not rewind or perform automatic readback.

@@ -20,12 +20,24 @@
 #include "opentape/archive_verify.h"
 #include "opentape/verify_stream.h"
 #include "opentape/archive_catalog.h"
+#include "opentape/catalog_file.h"
+#include "opentape/catalog_cli.h"
+#include "opentape/local_name.h"
 #include "opentape/restore.h"
+#include "opentape/source_file.h"
+#include "opentape/backup_ui.h"
+#include "opentape/paths_ui.h"
+#include "opentape/search_ui.h"
+#include "opentape/settings_ui.h"
+#include "opentape/backup_preview.h"
+#include "opentape/restore_ui.h"
+#include "opentape/verify_progress.h"
+#include "opentape/dos_mouse.h"
 #ifdef OT_NATIVE_TAPE_API
 #include "opentape/native_tape.h"
+#include "opentape/native_ui.h"
 #endif
 
-int ot_dos_backup(const char *, const char *, const char *, const char *, int);
 int ot_dos_restore_command(int, char **);
 
 static void usage(void)
@@ -36,18 +48,29 @@ static void usage(void)
     puts(OT_MSG_SCAN_USAGE);
     puts(OT_MSG_VERIFY_USAGE);
     puts(OT_MSG_LIST_USAGE);
+    puts(OT_MSG_CATCLI_USAGE);
+    puts(OT_MSG_CATCLI_UI_USAGE);
     puts(OT_MSG_REWIND_USAGE);
     puts(OT_MSG_DEVICES_USAGE);
 #ifdef OT_NATIVE_TAPE_API
     puts(OT_MSG_NATIVE_USAGE);
     puts(OT_MSG_NATIVE_SPACE_USAGE);
+    puts(OT_MSG_NATIVE_EXT_SPACE_USAGE);
     puts(OT_MSG_NATIVE_MEDIA_USAGE);
+    puts(OT_MSG_NATIVE_REMOVAL_USAGE);
+    puts(OT_MSG_NATIVE_ALERTS_USAGE);
+    puts(OT_MSG_NATIVE_LAYOUT_USAGE);
+    puts(OT_MSG_NATIVE_POSITION_USAGE);
+    puts(OT_MSG_NATIVE_LOCATE_USAGE);
+    puts(OT_MSG_NATIVE_WIDE_USAGE);
     puts(OT_MSG_NATIVE_ARCHIVE_USAGE);
 #endif
     puts(OT_MSG_UI_USAGE);
+    puts(OT_MSG_BUI_USAGE);
     puts(OT_MSG_SELECTION_USAGE);
     puts(OT_MSG_BACKUP_USAGE);
     puts(OT_MSG_TREE_USAGE);
+    puts(OT_MSG_SET_USAGE);
     puts(OT_MSG_RESTORE_USAGE);
     puts(OT_MSG_RESTORE_LIST_USAGE);
     puts(OT_MSG_RESTORE_FILTER_USAGE);
@@ -73,6 +96,16 @@ static void put_line(WINDESC *panel, int row, char *text, char color)
     if (line.ncols > 0) wput_csa(&line, text, color);
 }
 
+static void put_action(WINDESC *panel, int row, char *text, char color, unsigned key)
+{
+    put_line(panel, row, text, color);
+    ot_dos_mouse_bind(panel == &QuickWin ? 1u : 0u, row, 0, (unsigned)strlen(text), key);
+}
+
+/* Subviews share the established QUILIB renderer, windows and colors. */
+static void dos_ui_line(unsigned panel,int row,const char *text,unsigned char color)
+{ put_line(panel ? &QuickWin : &DataWin,row,(char *)text,(char)color); }
+
 static void clear_ui(void)
 {
     WINDESC screen;
@@ -94,10 +127,14 @@ void abortprep(int flag)
 enum ui_operation { UI_REWIND, UI_VERIFY, UI_CATALOG };
 enum ui_phase { UI_IDLE, UI_CONFIRM, UI_RESULT, UI_BUSY };
 enum ui_export_phase { EXPORT_IDLE, EXPORT_CONFIRM, EXPORT_BUSY, EXPORT_OK, EXPORT_FAILED, EXPORT_EMPTY, EXPORT_DISABLED };
+enum ui_import_phase { IMPORT_IDLE, IMPORT_CONFIRM, IMPORT_BUSY, IMPORT_OK, IMPORT_FAILED, IMPORT_DISABLED };
+enum ui_file_phase { FILE_IDLE, FILE_CONFIRM, FILE_BUSY, FILE_RESULT, FILE_DISABLED, FILE_EMPTY };
 #define UI_EXPORT_PATH_MAX 40u
 
 struct device_ui_state {
     char alias[7];
+    struct ot_backup_form backup_form;
+    char settings_name[OT_PATHS_FORM_MAX + 1u];
     unsigned native_backend;
 #ifdef OT_NATIVE_TAPE_API
     struct ot_tape_info_v1 native_status;
@@ -114,11 +151,29 @@ struct device_ui_state {
     int operation_result;
     struct ot_verify_session_result verification;
     struct ot_catalog catalog;
+    struct ot_volume_label catalog_label;
+    char catalog_filename[41];
+    unsigned catalog_offline, offline_notice;
     unsigned catalog_visible, catalog_cursor, catalog_left;
-    const char *export_name;
+    char catalog_query[OT_CATALOG_QUERY_MAX + 1u];
+    int search_result;
+    unsigned search_visible, search_wrapped;
+    struct ot_catalog_tree_result tree_result;
+    unsigned tree_visible;
+    int tree_error;
+    struct ot_paths_form paths;
+    enum ui_import_phase import_phase;
+    int import_result;
+    unsigned import_error, imported;
     enum ui_export_phase export_phase;
     int export_result;
     unsigned export_error;
+    unsigned restoring, comparing;
+    enum ui_file_phase file_phase;
+    struct ot_restore_selection *file_selection, *file_replacements;
+    unsigned file_replacement_count;
+    struct ot_dos_restore_result file_result;
+
 };
 
 static void draw_backend(const struct device_ui_state *state)
@@ -137,11 +192,49 @@ static void export_catalog_marks(struct device_ui_state *state)
     memset(&list, 0, sizeof(list)); memset(&output, 0, sizeof(output));
     state->export_result = ot_catalog_selection(&state->catalog, &list);
     if (state->export_result == 0)
-        state->export_result = ot_dos_selection_prepare(&output, state->export_name);
+        state->export_result = ot_dos_selection_prepare(&output, ot_paths_form_name(&state->paths, OT_PATH_EXPORT));
     if (state->export_result == 0) state->export_result = ot_dos_selection_save(&output, &list);
     state->export_error = output.dos_error;
     state->export_phase = state->export_result == 0 ? EXPORT_OK : EXPORT_FAILED;
     ot_restore_selection_free(&list);
+}
+
+static void import_catalog_marks(struct device_ui_state *state)
+{
+    state->import_result = ot_dos_catalog_import(&state->catalog, ot_paths_form_name(&state->paths, OT_PATH_IMPORT), &state->import_error);
+    state->imported = state->import_result == 0 ? state->catalog.marked : 0u;
+    if (state->import_result == 0) state->tree_visible = 0u;
+    state->import_phase = state->import_result == 0 ? IMPORT_OK : IMPORT_FAILED;
+}
+
+/* Each dialog owns immutable extraction and replacement snapshots. Live
+ * catalogue intent can then be consumed without changing an in-flight batch. */
+static void free_file_selection(struct device_ui_state *state)
+{
+    if (state->file_selection != 0) {
+        ot_restore_selection_free(state->file_selection);
+        free(state->file_selection); state->file_selection = 0;
+    }
+    if (state->file_replacements != 0) {
+        ot_restore_selection_free(state->file_replacements);
+        free(state->file_replacements); state->file_replacements = 0;
+    }
+}
+
+static void copy_file_selection(struct device_ui_state *state)
+{
+    state->file_replacement_count = 0u;
+    state->file_selection = calloc(1u, sizeof(*state->file_selection));
+    state->file_result.result = state->file_selection == 0 ? OT_CATALOG_MEMORY :
+        ot_catalog_selection(&state->catalog, state->file_selection);
+    if (state->file_result.result == 0 && !state->comparing && state->catalog.replacements != 0u) {
+        state->file_replacements = calloc(1u, sizeof(*state->file_replacements));
+        state->file_result.result = state->file_replacements == 0 ? OT_CATALOG_MEMORY :
+            ot_catalog_replacements(&state->catalog, state->file_replacements);
+        if (state->file_result.result == 0) state->file_replacement_count = state->file_replacements->count;
+    }
+    if (state->file_result.result == 0) state->file_phase = FILE_CONFIRM;
+    else free_file_selection(state);
 }
 
 static int ui_device_entry(void *context, const struct ot_device_entry *entry)
@@ -181,37 +274,168 @@ static int ui_native_scan(struct device_ui_state *state)
 }
 #endif
 
+/* This panel deliberately separates a read-only plan from write permission.
+ * Confirmation freezes the copied paths; all other keys consume/cancel it. */
+static const char *file_destination(const struct device_ui_state *state)
+{ return state->comparing ? ot_paths_form_name(&state->paths, OT_PATH_COMPARE) : state->restoring ? ot_paths_form_name(&state->paths, OT_PATH_RESTORE) : ot_paths_form_name(&state->paths, OT_PATH_PREVIEW); }
+
+static const char *file_action_text(const struct device_ui_state *state,
+                                  const char *preview, const char *restore, const char *compare)
+{ return state->comparing ? compare : state->restoring ? restore : preview; }
+
+static void draw_file_action_ui(const struct device_ui_state *state)
+{
+    char text[100];
+    paintBackgroundScreen();
+    ot_dos_mouse_clear();
+    put_line(&DataWin, 1, OT_MSG_APP_TITLE, DataYellowColor);
+    put_line(&DataWin, 2, file_action_text(state, OT_MSG_UI_PREVIEW_TITLE, OT_MSG_UI_WRITE_TITLE, OT_MSG_UI_COMPARE_TITLE), DataColor);
+    draw_backend(state);
+    sprintf(text, OT_MSG_UI_SELECTED, state->alias);
+    put_line(&DataWin, 4, text, DataYellowColor);
+    put_line(&DataWin, 6, state->comparing ? OT_MSG_UI_COMPARE_POLICY : state->restoring ?
+        (state->file_replacement_count ? OT_MSG_UI_WRITE_REPLACE_POLICY : OT_MSG_UI_WRITE_POLICY) :
+        (state->file_replacement_count ? OT_MSG_UI_PREVIEW_REPLACE_POLICY : OT_MSG_UI_PREVIEW_POLICY), DataColor);
+    if (file_destination(state) != 0) put_line(&DataWin, 8, (char *)file_destination(state), DataYellowColor);
+    if (state->file_phase == FILE_CONFIRM) {
+        sprintf(text, file_action_text(state, OT_MSG_UI_PREVIEW_CONFIRM, OT_MSG_UI_WRITE_CONFIRM, OT_MSG_UI_COMPARE_CONFIRM), state->file_selection->count);
+        put_line(&DataWin, 10, text, DataYellowColor);
+        if (state->comparing) strcpy(text, OT_MSG_UI_COMPARE_SCOPE);
+        else sprintf(text, OT_MSG_UI_REPLACE_COUNT, state->file_replacement_count);
+        put_line(&DataWin, 11, text, DataYellowColor);
+        put_line(&DataWin, 12, OT_MSG_UI_PREVIEW_MOVE, DataColor);
+        put_line(&DataWin, 19, OT_MSG_UI_REWIND_KEYS, DataColor);
+    } else if (state->file_phase == FILE_BUSY)
+        put_line(&DataWin, 19, file_action_text(state, OT_MSG_UI_PREVIEW_BUSY, OT_MSG_UI_WRITE_BUSY, OT_MSG_UI_COMPARE_BUSY), DataColor);
+    else if (state->file_phase == FILE_DISABLED)
+        put_line(&DataWin, 19, file_action_text(state, OT_MSG_UI_PREVIEW_DISABLED, OT_MSG_UI_WRITE_DISABLED, OT_MSG_UI_COMPARE_DISABLED), DataColor);
+    else if (state->file_phase == FILE_EMPTY)
+        put_line(&DataWin, 19, OT_MSG_UI_PREVIEW_EMPTY, DataColor);
+    else {
+        sprintf(text, file_action_text(state, OT_MSG_UI_PREVIEW_COUNTS, OT_MSG_UI_WRITE_COUNTS, OT_MSG_UI_COMPARE_COUNTS), (unsigned long)state->file_result.files,
+            (unsigned long)state->file_result.skipped, (unsigned long)state->file_result.excluded);
+        put_line(&DataWin, 10, text, DataColor);
+        if (state->file_result.result != 0) {
+            sprintf(text, file_action_text(state, OT_MSG_UI_PREVIEW_FAILED, OT_MSG_UI_WRITE_FAILED, OT_MSG_UI_COMPARE_FAILED), state->file_result.result,
+                state->file_result.tape_error, state->file_result.disk_error);
+            put_line(&DataWin, 12, text, DataYellowColor);
+            put_line(&DataWin, 14, state->comparing ? OT_MSG_UI_COMPARE_INCOMPLETE : state->restoring ?
+                (state->file_result.output_prepared ? OT_MSG_UI_WRITE_PARTIAL : OT_MSG_UI_WRITE_STOPPED) :
+                OT_MSG_UI_PREVIEW_INCOMPLETE, DataColor);
+        } else put_line(&DataWin, 14, file_action_text(state, OT_MSG_UI_PREVIEW_OK, OT_MSG_UI_WRITE_OK, OT_MSG_UI_COMPARE_OK), DataYellowColor);
+        if (state->restoring || state->comparing) {
+            if (state->comparing)
+                sprintf(text, OT_MSG_UI_COMPARE_CHECKED, state->file_result.readback_files, state->file_result.readback_error);
+            else sprintf(text, OT_MSG_UI_WRITE_READBACK, state->file_result.readback_files,
+                state->file_result.readback_error, state->file_result.recovery_error);
+            put_line(&DataWin, 11, text, DataColor);
+            if (state->file_result.readback_error != 0) {
+                /* Preserve the whole diagnostic path across three DOS rows. */
+                unsigned offset, length = (unsigned)strlen(state->file_result.checked_path);
+                for (offset = 0u; offset < length; offset += 47u) {
+                    sprintf(text, "%.47s", state->file_result.checked_path + offset);
+                    put_line(&DataWin, 17 + (int)(offset / 47u), text, DataYellowColor);
+                }
+            }
+        }
+        if (state->comparing) {
+            if (state->file_result.readback_error != 0)
+                put_line(&DataWin, 13, state->file_result.readback_error == OT_SOURCE_CONTENT ?
+                    OT_MSG_UI_COMPARE_DIFFERENT : state->file_result.readback_error == OT_SOURCE_CHANGED ?
+                    OT_MSG_UI_COMPARE_CHANGED : OT_MSG_UI_COMPARE_FILE_ERROR, DataYellowColor);
+        } else {
+            sprintf(text, state->restoring ? OT_MSG_UI_REPLACE_DONE : OT_MSG_UI_REPLACE_PLANNED,
+                state->file_result.replaced);
+            put_line(&DataWin, state->restoring ? 13 : 11, text, DataColor);
+        }
+        sprintf(text, OT_MSG_UI_PREVIEW_UNMATCHED, state->file_result.unmatched);
+        put_line(&DataWin, 16, text, DataColor);
+    }
+    put_line(&QuickWin, 1, OT_MSG_HELP_TITLE, QuickBackColor);
+    put_action(&QuickWin, 3, OT_MSG_UI_PREVIEW_BACK, QuickBackColor, KEY_ESCAPE);
+    put_line(&QuickWin, 16, OT_MSG_UI_HELP_READY, QuickBackColor);
+    if (state->file_phase == FILE_CONFIRM || state->file_phase == FILE_BUSY) {
+        ot_dos_mouse_clear();
+        if (state->file_phase == FILE_CONFIRM)
+            ot_dos_mouse_pair(0u, 19, OT_MSG_UI_REWIND_KEYS, OT_UI_CONFIRM_KEY, KEY_ESCAPE);
+    }
+}
+
+/* Search affects only the offline inspection cursor. Every invocation clears
+ * old transient notices, never marks/replacement intent or driver snapshots. */
+static void search_catalog(struct device_ui_state *state, int direction, unsigned include_current)
+{
+    struct ot_catalog_match match;
+    state->import_phase = IMPORT_IDLE; state->export_phase = EXPORT_IDLE;
+    state->search_visible = 1u; state->search_wrapped = 0u; state->tree_visible = 0u;
+    state->search_result = ot_catalog_search(&state->catalog, state->catalog_query,
+        state->catalog_cursor, direction, include_current, &match);
+    if (state->search_result == 0) {
+        state->catalog_cursor = match.index; state->catalog_left = 0u;
+        state->search_wrapped = match.wrapped;
+    }
+}
+
+/* Only successful imports switch provenance. Failed/cancelled file operations
+ * preserve the live snapshot, annotations and cursor without a tape query. */
+static void catalog_file_action(struct device_ui_state *state, unsigned exporting)
+{
+    if (exporting && !state->catalog_visible) return;
+    if (ot_dos_catalog_file_ui(&state->catalog, &state->catalog_label,
+        state->catalog_filename, exporting, dos_ui_line)) {
+        state->catalog_visible = state->catalog_offline = 1u;
+        state->catalog_cursor = state->catalog_left = 0u;
+        state->search_visible = state->tree_visible = state->offline_notice = 0u;
+        state->export_phase = EXPORT_IDLE; state->import_phase = IMPORT_IDLE;
+    }
+}
+
 static void draw_catalog_ui(const struct device_ui_state *state)
 {
     const struct ot_catalog_entry *entry;
     unsigned first = (state->catalog_cursor / 10u) * 10u, last, i;
     char text[128];
+    if (state->file_phase != FILE_IDLE) { draw_file_action_ui(state); return; }
     last = first + 10u;
     if (last > state->catalog.count) last = state->catalog.count;
     paintBackgroundScreen();
+    ot_dos_mouse_clear();
     put_line(&DataWin, 1, OT_MSG_APP_TITLE, DataYellowColor);
-    put_line(&DataWin, 2, OT_MSG_UI_CATALOG_TITLE, DataColor);
-    draw_backend(state);
-    sprintf(text, OT_MSG_UI_SELECTED, state->alias);
+    put_line(&DataWin, 2, state->catalog_offline ? OT_MSG_CATFILE_OFFLINE : OT_MSG_UI_CATALOG_TITLE, DataColor);
+    if (state->catalog_offline) {
+        sprintf(text, OT_MSG_CATFILE_VOLUME, state->catalog_label.volume_name);
+        put_line(&DataWin, 3, text, DataColor);
+    } else draw_backend(state);
+    if (state->catalog_offline) strcpy(text, OT_MSG_CATFILE_WARNING);
+    else sprintf(text, OT_MSG_UI_SELECTED, state->alias);
     put_line(&DataWin, 4, text, DataYellowColor);
-    if (state->export_phase == EXPORT_CONFIRM) strcpy(text, OT_MSG_UI_EXPORT_WARNING);
+    if (state->import_phase == IMPORT_CONFIRM) strcpy(text, OT_MSG_UI_IMPORT_WARNING);
+    else if (state->export_phase == EXPORT_CONFIRM) strcpy(text, OT_MSG_UI_EXPORT_WARNING);
     else sprintf(text, OT_MSG_UI_CATALOG_PAGE, state->catalog.count, last != 0u ? first + 1u : 0u, last);
     put_line(&DataWin, 5, text, DataColor);
-    sprintf(text, OT_MSG_UI_CATALOG_COLUMNS, state->catalog.marked);
+    sprintf(text, OT_MSG_UI_CATALOG_COLUMNS, state->catalog.marked, state->catalog.replacements);
     put_line(&DataWin, 6, text, DataColor);
     entry = ot_catalog_at(&state->catalog, first);
     for (i = first; i < last && entry != 0; ++i, entry = entry->next) {
-        sprintf(text, "[%c] %c %10lu %.27s", entry->metadata.kind == OT_FILE_DIRECTORY ? '-' : entry->marked ? 'x' : ' ',
+        sprintf(text, "[%c] %c %10lu %.27s", entry->metadata.kind == OT_FILE_DIRECTORY ? '-' : entry->replace ? '!' : entry->marked ? 'x' : ' ',
             entry->metadata.kind == OT_FILE_DIRECTORY ? 'D' : 'F',
             (unsigned long)entry->metadata.file_size, entry->metadata.path);
         put_line(&DataWin, 7 + (int)(i - first), text,
             i == state->catalog_cursor ? DataYellowColor : DataColor);
+        ot_dos_mouse_bind(0u, 7 + (int)(i - first), 0, 3u,
+            (entry->metadata.kind == OT_FILE_REGULAR ? OT_UI_MOUSE_MARK : OT_UI_MOUSE_ROW) + i - first);
+        ot_dos_mouse_bind(0u, 7 + (int)(i - first), 3, (unsigned)strlen(text) - 3u, OT_UI_MOUSE_ROW + i - first);
     }
     entry = ot_catalog_at(&state->catalog, state->catalog_cursor);
-    if (state->export_phase == EXPORT_CONFIRM) {
+    if (state->import_phase == IMPORT_CONFIRM || state->import_phase == IMPORT_FAILED) {
+        if (state->import_phase == IMPORT_CONFIRM) strcpy(text, OT_MSG_UI_IMPORT_CONFIRM);
+        else sprintf(text, OT_MSG_UI_IMPORT_FAILED, state->import_result, state->import_error);
+        put_line(&DataWin, 17, text, DataYellowColor);
+        put_line(&DataWin, 18, (char *)ot_paths_form_name(&state->paths, OT_PATH_IMPORT), DataYellowColor);
+    } else if (state->export_phase == EXPORT_CONFIRM) {
         sprintf(text, OT_MSG_UI_EXPORT_CONFIRM, state->catalog.marked);
         put_line(&DataWin, 17, text, DataYellowColor);
-        put_line(&DataWin, 18, (char *)state->export_name, DataYellowColor);
+        put_line(&DataWin, 18, (char *)ot_paths_form_name(&state->paths, OT_PATH_EXPORT), DataYellowColor);
     } else if (entry != 0) {
         sprintf(text, "session=%lu object=%lu attr=%02X", (unsigned long)entry->session,
             (unsigned long)entry->object, (unsigned)entry->metadata.dos_attributes);
@@ -219,7 +443,15 @@ static void draw_catalog_ui(const struct device_ui_state *state)
         sprintf(text, "%03u: %.40s", state->catalog_left, entry->metadata.path + state->catalog_left);
         put_line(&DataWin, 18, text, DataYellowColor);
     }
-    if (state->export_phase == EXPORT_FAILED) {
+    if (state->import_phase != IMPORT_IDLE) {
+        if (state->import_phase == IMPORT_OK) sprintf(text, OT_MSG_UI_IMPORT_OK, state->imported);
+        else strcpy(text, state->import_phase == IMPORT_CONFIRM ? OT_MSG_UI_REWIND_KEYS :
+            state->import_phase == IMPORT_BUSY ? OT_MSG_UI_IMPORT_BUSY :
+            state->import_phase == IMPORT_DISABLED ? OT_MSG_UI_IMPORT_DISABLED :
+            state->import_result == OT_CATALOG_MISSING ? OT_MSG_UI_IMPORT_MISSING :
+            state->import_result == OT_CATALOG_AMBIGUOUS ? OT_MSG_UI_IMPORT_AMBIGUOUS : OT_MSG_UI_IMPORT_UNCHANGED);
+        put_line(&DataWin, 19, text, DataColor);
+    } else if (state->export_phase == EXPORT_FAILED) {
         sprintf(text, OT_MSG_UI_EXPORT_FAILED, state->export_result, state->export_error);
         put_line(&DataWin, 19, text, DataYellowColor);
     } else put_line(&DataWin, 19,
@@ -227,19 +459,60 @@ static void draw_catalog_ui(const struct device_ui_state *state)
         state->export_phase == EXPORT_BUSY ? OT_MSG_UI_EXPORT_BUSY :
         state->export_phase == EXPORT_OK ? OT_MSG_UI_EXPORT_OK :
         state->export_phase == EXPORT_EMPTY ? OT_MSG_UI_EXPORT_EMPTY :
-        state->export_phase == EXPORT_DISABLED ? OT_MSG_UI_EXPORT_DISABLED : OT_MSG_UI_CATALOG_SCOPE, DataColor);
+        state->export_phase == EXPORT_DISABLED ? OT_MSG_UI_EXPORT_DISABLED :
+        state->catalog_offline ? OT_MSG_CATFILE_LOADED : OT_MSG_UI_CATALOG_SCOPE, DataColor);
+    if (state->search_visible && state->export_phase == EXPORT_IDLE && state->import_phase == IMPORT_IDLE) {
+        if (state->search_result == 0)
+            sprintf(text, state->search_wrapped ? OT_MSG_SEARCH_WRAPPED : OT_MSG_SEARCH_FOUND,
+                state->catalog_cursor + 1u, state->catalog.count);
+        else strcpy(text, state->search_result == OT_CATALOG_SEARCH_MISS ? OT_MSG_SEARCH_MISS :
+            state->search_result == OT_CATALOG_SEARCH_EMPTY ? OT_MSG_SEARCH_EMPTY : OT_MSG_SEARCH_INVALID);
+        put_line(&DataWin, 19, "                                               ", DataColor);
+        put_line(&DataWin, 19, text, DataYellowColor);
+    }
+    if (state->tree_visible && state->export_phase == EXPORT_IDLE && state->import_phase == IMPORT_IDLE) {
+        if (state->tree_error != 0) strcpy(text, OT_MSG_TREE_INVALID);
+        else if (state->tree_result.files == 0u) strcpy(text, OT_MSG_TREE_EMPTY);
+        else sprintf(text, OT_MSG_TREE_RESULT, state->tree_result.selected, state->tree_result.files);
+        put_line(&DataWin, 19, "                                               ", DataColor);
+        put_line(&DataWin, 19, text, DataYellowColor);
+    }
+    if (state->offline_notice) {
+        put_line(&DataWin, 19, "                                               ", DataColor);
+        put_line(&DataWin, 19, OT_MSG_CATFILE_BLOCKED, DataYellowColor);
+    }
     put_line(&QuickWin, 1, OT_MSG_HELP_TITLE, QuickBackColor);
+    put_action(&QuickWin, 2, OT_MSG_PFORM_ENTRY, QuickBackColor, 'p');
     put_line(&QuickWin, 3, OT_MSG_UI_CATALOG_ARROWS, QuickBackColor);
+    ot_dos_mouse_pair(1u, 3, OT_MSG_UI_CATALOG_ARROWS, KEY_UP, KEY_DOWN);
+    put_action(&QuickWin, 4, OT_MSG_SEARCH_ENTRY, QuickBackColor, 's');
+    put_line(&QuickWin, 6, OT_MSG_SEARCH_NEXT_KEYS, QuickBackColor);
+    ot_dos_mouse_pair(1u, 6, OT_MSG_SEARCH_NEXT_KEYS, KEY_F3, KEY_SF3);
     put_line(&QuickWin, 5, OT_MSG_UI_CATALOG_PAGES, QuickBackColor);
+    ot_dos_mouse_pair(1u, 5, OT_MSG_UI_CATALOG_PAGES, KEY_PGUP, KEY_PGDN);
     put_line(&QuickWin, 7, OT_MSG_UI_CATALOG_ENDS, QuickBackColor);
+    ot_dos_mouse_pair(1u, 7, OT_MSG_UI_CATALOG_ENDS, KEY_HOME, KEY_END);
+    put_action(&QuickWin, 8, OT_MSG_UI_COMPARE_HELP, QuickBackColor, 'k');
     put_line(&QuickWin, 9, OT_MSG_UI_CATALOG_PATH, QuickBackColor);
-    put_line(&QuickWin, 11, OT_MSG_UI_CATALOG_BACK, QuickBackColor);
-    put_line(&QuickWin, 12, OT_MSG_UI_CATALOG_MARK, QuickBackColor);
+    ot_dos_mouse_pair(1u, 9, OT_MSG_UI_CATALOG_PATH, KEY_LEFT, KEY_RIGHT);
+    put_action(&QuickWin, 10, OT_MSG_UI_IMPORT_HELP, QuickBackColor, 'i');
+    put_line(&QuickWin, 11, OT_MSG_CATFILE_BACK, QuickBackColor);
+    ot_dos_mouse_pair(1u, 11, OT_MSG_CATFILE_BACK, KEY_ESCAPE, KEY_F8);
+    put_action(&QuickWin, 12, OT_MSG_TREE_ENTRY, QuickBackColor, KEY_ENTER);
     put_line(&QuickWin, 13, OT_MSG_UI_CATALOG_ALL, QuickBackColor);
-    put_line(&QuickWin, 14, OT_MSG_UI_HELP_READONLY, QuickBackColor);
-    put_line(&QuickWin, 15, OT_MSG_UI_CATALOG_VIEW, QuickBackColor);
-    put_line(&QuickWin, 17, OT_MSG_UI_EXPORT_HELP, QuickBackColor);
+    ot_dos_mouse_pair(1u, 13, OT_MSG_UI_CATALOG_ALL, 'a', 'n');
+    put_action(&QuickWin, 14, OT_MSG_UI_REPLACE_HELP, QuickBackColor, 'o');
+    put_line(&QuickWin, 19, OT_MSG_UI_HELP_READONLY, QuickBackColor);
+    put_action(&QuickWin, 15, OT_MSG_UI_PREVIEW_HELP, QuickBackColor, 'c');
+    put_action(&QuickWin, 17, OT_MSG_UI_EXPORT_HELP, QuickBackColor, 'e');
+    put_action(&QuickWin, 18, OT_MSG_UI_WRITE_HELP, QuickBackColor, 'w');
     put_line(&QuickWin, 16, OT_MSG_UI_HELP_READY, QuickBackColor);
+    if (state->export_phase == EXPORT_CONFIRM || state->import_phase == IMPORT_CONFIRM ||
+        state->export_phase == EXPORT_BUSY || state->import_phase == IMPORT_BUSY) {
+        ot_dos_mouse_clear();
+        if (state->export_phase == EXPORT_CONFIRM || state->import_phase == IMPORT_CONFIRM)
+            ot_dos_mouse_pair(0u, 19, OT_MSG_UI_REWIND_KEYS, OT_UI_CONFIRM_KEY, KEY_ESCAPE);
+    }
 }
 
 static void draw_device_ui(const struct device_ui_state *state)
@@ -249,6 +522,7 @@ static void draw_device_ui(const struct device_ui_state *state)
     const struct ot_device_entry *entry;
     if (state->catalog_visible) { draw_catalog_ui(state); return; }
     paintBackgroundScreen();
+    ot_dos_mouse_clear();
     put_line(&DataWin, 1, OT_MSG_APP_TITLE, DataYellowColor);
     put_line(&DataWin, 2, OT_MSG_UI_TITLE, DataColor);
     draw_backend(state);
@@ -271,6 +545,7 @@ static void draw_device_ui(const struct device_ui_state *state)
                 entry->result, entry->dos_error);
         }
         put_line(&DataWin, (int)i + 8, text, state->alias[4] == (char)('0' + i) ? DataYellowColor : DataColor);
+        ot_dos_mouse_bind(0u, (int)i + 8, 0, (unsigned)strlen(text), '0' + i);
     }
     if (state->scanned) {
         sprintf(text, OT_MSG_UI_SCAN, state->scanned, state->scan_result, state->summary.found, state->summary.missing);
@@ -344,19 +619,35 @@ static void draw_device_ui(const struct device_ui_state *state)
         put_line(&DataWin, 19, OT_MSG_UI_VERIFY_POSITION, DataColor);
     else put_line(&DataWin, 19, state->native_backend ? OT_MSG_UI_NATIVE_TRANSPORT : OT_MSG_UI_TRANSPORT, DataColor);
     put_line(&QuickWin, 1, OT_MSG_HELP_TITLE, QuickBackColor);
-    put_line(&QuickWin, 3, OT_MSG_UI_HELP_DEVICES, QuickBackColor);
+    put_line(&QuickWin, 2, OT_MSG_CATFILE_QUICK, QuickBackColor);
+    ot_dos_mouse_pair(1u, 2, OT_MSG_CATFILE_QUICK, KEY_F8, KEY_F9);
+    put_action(&QuickWin, 3, OT_MSG_UI_HELP_DEVICES, QuickBackColor, 'd');
+    put_action(&QuickWin, 4, OT_MSG_CFG_EXPORT_ENTRY, QuickBackColor, KEY_F5);
+    put_action(&QuickWin, 6, OT_MSG_CFG_IMPORT_ENTRY, QuickBackColor, KEY_F6);
     put_line(&QuickWin, 5, OT_MSG_UI_HELP_SELECT, QuickBackColor);
-    put_line(&QuickWin, 7, OT_MSG_UI_HELP_STATUS, QuickBackColor);
-    put_line(&QuickWin, 9, OT_MSG_UI_HELP_ENTER, QuickBackColor);
-    put_line(&QuickWin, 11, OT_MSG_UI_HELP_EXIT, QuickBackColor);
-    put_line(&QuickWin, 13, OT_MSG_UI_HELP_REWIND, QuickBackColor);
-    put_line(&QuickWin, 14, OT_MSG_UI_HELP_READONLY, QuickBackColor);
-    put_line(&QuickWin, 15, OT_MSG_UI_HELP_VERIFY, QuickBackColor);
-    put_line(&QuickWin, 17, OT_MSG_UI_HELP_CATALOG, QuickBackColor);
+    put_action(&QuickWin, 7, OT_MSG_UI_HELP_STATUS, QuickBackColor, 's');
+    put_action(&QuickWin, 8, OT_MSG_PFORM_ENTRY, QuickBackColor, 'p');
+    put_action(&QuickWin, 9, OT_MSG_UI_HELP_ENTER, QuickBackColor, KEY_ENTER);
+    put_action(&QuickWin, 10, OT_MSG_BFORM_ENTRY, QuickBackColor, 'f');
+    put_action(&QuickWin, 11, OT_MSG_UI_HELP_EXIT, QuickBackColor, KEY_ESCAPE);
+    put_action(&QuickWin, 12, OT_MSG_BUI_ENTRY, QuickBackColor, 'b');
+    put_action(&QuickWin, 13, OT_MSG_UI_HELP_REWIND, QuickBackColor, 'r');
+    put_line(&QuickWin, 14, OT_MSG_BUI_HELP_POLICY, QuickBackColor);
+    put_action(&QuickWin, 15, OT_MSG_UI_HELP_VERIFY, QuickBackColor, 'v');
+    put_action(&QuickWin, 17, OT_MSG_UI_HELP_CATALOG, QuickBackColor, 'l');
+#ifdef OT_NATIVE_TAPE_API
+    if(state->native_backend) put_action(&QuickWin, 18, OT_MSG_NUI_ENTRY, QuickBackColor, 't');
+#endif
+    put_action(&QuickWin, 19, OT_MSG_BPLAN_ENTRY, QuickBackColor, KEY_F7);
     put_line(&QuickWin, 16, OT_MSG_UI_HELP_READY, QuickBackColor);
+    if (state->phase == UI_CONFIRM || state->phase == UI_BUSY) {
+        ot_dos_mouse_clear();
+        if (state->phase == UI_CONFIRM)
+            ot_dos_mouse_pair(0u, 19, OT_MSG_UI_REWIND_KEYS, OT_UI_CONFIRM_KEY, KEY_ESCAPE);
+    }
 }
 
-static void show_ui(const char *alias, const char *export_name)
+static int show_ui(const char *alias, const char *export_name, const char *preview_name, const char *restore_name, const char *compare_name, const char *import_name, const struct ot_dos_backup_request *backup, const char *catalog_input)
 {
     struct device_ui_state state;
     INPUTEVENT event;
@@ -364,18 +655,113 @@ static void show_ui(const char *alias, const char *export_name)
     const struct ot_catalog_entry *entry;
     oa_u8 *buffer;
     memset(&state, 0, sizeof(state)); strcpy(state.alias, alias);
-    state.export_name = export_name;
+    strcpy(state.settings_name, "OPENTAPE.CFG");
+    strcpy(state.catalog_filename, "OPENTAPE.CAT");
+    if (export_name != 0) (void)ot_paths_form_set(&state.paths, OT_PATH_EXPORT, export_name);
+    if (preview_name != 0) (void)ot_paths_form_set(&state.paths, OT_PATH_PREVIEW, preview_name);
+    if (restore_name != 0) (void)ot_paths_form_set(&state.paths, OT_PATH_RESTORE, restore_name);
+    if (compare_name != 0) (void)ot_paths_form_set(&state.paths, OT_PATH_COMPARE, compare_name);
+    if (import_name != 0) (void)ot_paths_form_set(&state.paths, OT_PATH_IMPORT, import_name);
+    ot_backup_form_init(&state.backup_form, backup);
     state.native_backend = ot_dos_archive_is_native();
     for (i = 0u; state.alias[i] != 0; ++i)
         if (state.alias[i] >= 'a' && state.alias[i] <= 'z') state.alias[i] = (char)(state.alias[i] - 'a' + 'A');
+    if (catalog_input != 0) {
+        unsigned error = 0u;
+        int rc = ot_dos_catalog_file_load(&state.catalog, &state.catalog_label, catalog_input, &error);
+        if (rc != 0) {
+            fprintf(stderr, OT_MSG_CATCLI_FAILED, catalog_input, rc, error);
+            ot_catalog_free(&state.catalog); return 2;
+        }
+        strcpy(state.catalog_filename, catalog_input);
+        state.catalog_visible = state.catalog_offline = 1u;
+    }
     initializeScreenInfo(FALSE);
     init_input(NULL);
     hide_cursor();
     draw_device_ui(&state);
     for (;;) {
-        if (!get_input(INPUT_WAIT, &event) || event.key == 0) continue;
+        if (!ot_dos_mouse_input(&event)) continue;
         key = event.key;
         if (state.catalog_visible) {
+            if (event.click != MOU_NOCLICK &&
+                ((key >= OT_UI_MOUSE_ROW && key < OT_UI_MOUSE_ROW + 10u) ||
+                 (key >= OT_UI_MOUSE_MARK && key < OT_UI_MOUSE_MARK + 10u))) {
+                i = (state.catalog_cursor / 10u) * 10u + (key & 0xffu);
+                if (i >= state.catalog.count) continue;
+                state.catalog_cursor = i; state.catalog_left = 0u; state.search_visible = state.tree_visible = 0u;
+                state.import_phase = IMPORT_IDLE; state.export_phase = EXPORT_IDLE;
+                if (key < OT_UI_MOUSE_MARK) { draw_device_ui(&state); continue; }
+                key = ' ';
+            }
+            if (state.file_phase != FILE_IDLE) {
+                if (state.file_phase == FILE_CONFIRM &&
+                    (key == OT_UI_CONFIRM_KEY || key == OT_UI_CONFIRM_KEY - 'a' + 'A')) {
+                    state.file_phase = FILE_BUSY;
+                    draw_device_ui(&state);
+                    state.status_known = state.count = state.scanned = 0u;
+                    memset(&state.status, 0, sizeof(state.status));
+                    {
+                        struct ot_restore_progress_view progress;
+                        memset(&progress, 0, sizeof(progress));
+                        progress.device = state.alias; progress.destination = file_destination(&state);
+                        progress.selected = state.file_selection->count; progress.line = dos_ui_line;
+                        progress.action = state.comparing ? OT_DOS_FILE_COMPARE : state.restoring ? OT_DOS_FILE_RESTORE : OT_DOS_FILE_PREVIEW;
+                        if (state.restoring) ot_catalog_clear_replacements(&state.catalog);
+                        (void)ot_dos_selected_observed(state.alias, progress.destination, state.file_selection,
+                            state.comparing ? 0 : state.file_replacements, progress.action,
+                            ot_dos_restore_progress, &progress, &state.file_result);
+                    }
+                    state.file_phase = FILE_RESULT;
+                } else state.file_phase = FILE_IDLE;
+                free_file_selection(&state);
+                draw_device_ui(&state);
+                continue;
+            }
+            if (state.import_phase == IMPORT_CONFIRM) {
+                state.import_phase = IMPORT_IDLE;
+                if (key == OT_UI_CONFIRM_KEY || key == OT_UI_CONFIRM_KEY - 'a' + 'A') {
+                    state.import_phase = IMPORT_BUSY;
+                    draw_device_ui(&state);
+                    import_catalog_marks(&state);
+                }
+                draw_device_ui(&state);
+                continue;
+            }
+            if ((key == 'p' || key == 'P') && state.export_phase != EXPORT_CONFIRM) {
+                (void)ot_dos_paths_form_ui(&state.paths, dos_ui_line);
+                state.import_phase = IMPORT_IDLE; state.export_phase = EXPORT_IDLE;
+                draw_device_ui(&state); continue;
+            }
+            if ((key == 'i' || key == 'I') && state.export_phase != EXPORT_CONFIRM) {
+                state.export_phase = EXPORT_IDLE;
+                state.import_phase = ot_paths_form_name(&state.paths, OT_PATH_IMPORT) == 0 ? IMPORT_DISABLED : IMPORT_CONFIRM;
+                draw_device_ui(&state);
+                continue;
+            }
+            state.offline_notice = 0u;
+            if (state.catalog_offline && state.export_phase != EXPORT_CONFIRM &&
+                (key == 'c' || key == 'C' || key == 'w' || key == 'W' ||
+                 key == 'k' || key == 'K' || key == 'o' || key == 'O')) {
+                state.offline_notice = 1u;
+                draw_device_ui(&state); continue;
+            }
+            if ((key == 'c' || key == 'C' || key == 'w' || key == 'W' || key == 'k' || key == 'K') && state.export_phase != EXPORT_CONFIRM) {
+                state.import_phase = IMPORT_IDLE;
+                state.restoring = key == 'w' || key == 'W';
+                state.comparing = key == 'k' || key == 'K';
+                state.file_replacement_count = 0u;
+                memset(&state.file_result, 0, sizeof(state.file_result));
+                state.export_phase = EXPORT_IDLE;
+                state.file_phase = FILE_RESULT;
+                if (file_destination(&state) == 0) state.file_phase = FILE_DISABLED;
+                else if (state.catalog.marked == 0u) state.file_phase = FILE_EMPTY;
+                else {
+                    copy_file_selection(&state);
+                }
+                draw_device_ui(&state);
+                continue;
+            }
             if (state.export_phase == EXPORT_CONFIRM) {
                 state.export_phase = EXPORT_IDLE;
                 if (key == OT_UI_CONFIRM_KEY || key == OT_UI_CONFIRM_KEY - 'a' + 'A') {
@@ -386,8 +772,20 @@ static void show_ui(const char *alias, const char *export_name)
                 draw_device_ui(&state);
                 continue;
             }
+            if (key == KEY_F8 || key == KEY_F9) {
+                catalog_file_action(&state, key == KEY_F8);
+                draw_device_ui(&state); continue;
+            }
+            if (key == 's' || key == 'S' || key == KEY_F3 || key == KEY_SF3) {
+                if (key == 's' || key == 'S') {
+                    if (ot_dos_catalog_search_ui(state.catalog_query, dos_ui_line))
+                        search_catalog(&state, 1, 1u);
+                } else search_catalog(&state, key == KEY_SF3 ? -1 : 1, 0u);
+                draw_device_ui(&state); continue;
+            }
             if (key == 'e' || key == 'E') {
-                state.export_phase = state.export_name == 0 ? EXPORT_DISABLED :
+                state.import_phase = IMPORT_IDLE;
+                state.export_phase = ot_paths_form_name(&state.paths, OT_PATH_EXPORT) == 0 ? EXPORT_DISABLED :
                     state.catalog.marked == 0u ? EXPORT_EMPTY : EXPORT_CONFIRM;
                 draw_device_ui(&state);
                 continue;
@@ -403,10 +801,20 @@ static void show_ui(const char *alias, const char *export_name)
             else if (key == KEY_PGDN) state.catalog_cursor = i + 10u < state.catalog.count ? i + 10u : state.catalog.count - 1u;
             else if (key == KEY_HOME) state.catalog_cursor = 0u;
             else if (key == KEY_END) state.catalog_cursor = state.catalog.count - 1u;
-            else if (key == ' ') {
+            else if (key == ' ' || key == KEY_ENTER) {
                 entry = ot_catalog_at(&state.catalog, i);
                 if (entry != 0 && entry->metadata.kind == OT_FILE_REGULAR)
                     ot_catalog_mark(&state.catalog, i, !entry->marked);
+                else if (entry != 0 && key == KEY_ENTER && entry->metadata.kind == OT_FILE_DIRECTORY) {
+                    state.tree_error = ot_catalog_mark_tree(&state.catalog, i, OT_CATALOG_TREE_TOGGLE, &state.tree_result);
+                    state.tree_visible = 1u; state.search_visible = 0u;
+                    state.import_phase = IMPORT_IDLE; state.export_phase = EXPORT_IDLE;
+                    draw_device_ui(&state); continue;
+                }
+            } else if (key == 'o' || key == 'O') {
+                entry = ot_catalog_at(&state.catalog, i);
+                if (entry != 0 && entry->marked && entry->metadata.kind == OT_FILE_REGULAR)
+                    ot_catalog_replace(&state.catalog, i, !entry->replace);
             } else if (key == 'a' || key == 'A') ot_catalog_mark_all(&state.catalog, 1u);
             else if (key == 'n' || key == 'N') ot_catalog_mark_all(&state.catalog, 0u);
             else if (key == KEY_LEFT) state.catalog_left = state.catalog_left >= 8u ? state.catalog_left - 8u : 0u;
@@ -418,7 +826,9 @@ static void show_ui(const char *alias, const char *export_name)
                         state.catalog_left = (unsigned)strlen(entry->metadata.path) - 1u;
                 }
             } else continue;
+            state.import_phase = IMPORT_IDLE;
             state.export_phase = EXPORT_IDLE;
+            state.search_visible = state.tree_visible = 0u;
             if (i != state.catalog_cursor) state.catalog_left = 0u;
             draw_device_ui(&state);
             continue;
@@ -447,16 +857,23 @@ static void show_ui(const char *alias, const char *export_name)
                     state.verify_memory = buffer == 0;
                     state.operation_result = OT_READ_BAD_ARGUMENT;
                     if (buffer != 0) {
-                        state.operation_result = ot_dos_archive_verify(state.alias,
+                        struct ot_verify_progress_view progress;
+                        memset(&progress, 0, sizeof(progress));
+                        progress.device = state.alias; progress.line = dos_ui_line;
+                        progress.cataloguing = state.operation == UI_CATALOG;
+                        state.operation_result = ot_dos_archive_verify_observed(state.alias,
                             buffer, OT_BLOCK_RECOMMENDED_SIZE,
                             state.operation == UI_CATALOG ? ot_catalog_capture : 0,
-                            &state.catalog, &state.verification);
+                            &state.catalog, ot_dos_verify_progress, &progress, &state.verification);
                         free(buffer);
                     }
                     if (state.operation == UI_CATALOG) {
                         if (state.operation_result == 0 && !state.verify_memory) {
                             state.catalog_visible = 1u;
+                            state.catalog_offline = state.offline_notice = 0u;
+                            state.catalog_label = state.verification.verify.framing.label;
                             state.catalog_cursor = state.catalog_left = 0u;
+                            state.search_visible = state.tree_visible = 0u;
                             state.export_phase = EXPORT_IDLE;
                         } else {
                             if (state.operation_result == OT_VERIFY_VISITOR_FAILED && state.catalog.error != 0)
@@ -477,8 +894,10 @@ static void show_ui(const char *alias, const char *export_name)
         else if (key == KEY_DOWN) key = state.alias[4] == '3' ? '0' : state.alias[4] + 1;
         if (!((key >= '0' && key <= '3') || key == 'd' || key == 'D' ||
               key == 'r' || key == 'R' || key == 'v' || key == 'V' ||
-              key == 'l' || key == 'L' ||
-              key == 's' || key == 'S' || key == KEY_ENTER)) continue;
+              key == 'l' || key == 'L' || key == 't' || key == 'T' ||
+              key == 's' || key == 'S' || key == 'b' || key == 'B' ||
+              key == 'f' || key == 'F' || key == 'p' || key == 'P' || key == KEY_F5 || key == KEY_F6 || key == KEY_F7 || key == KEY_F8 || key == KEY_F9 || key == KEY_ENTER)) continue;
+        if((key=='t' || key=='T') && !state.native_backend) continue;
         state.phase = UI_IDLE;
         if (key >= '0' && key <= '3') {
             state.alias[4] = (char)key; state.status_known = 0u;
@@ -494,6 +913,42 @@ static void show_ui(const char *alias, const char *export_name)
             state.scan_result = ot_tape_enumerate(&ot_dos_reader_ops()->probe, state.alias[2],
                 state.alias[5] == '$', ui_device_entry, &state, &state.summary);
             if (state.scanned < 65535u) ++state.scanned;
+        } else if (key == KEY_F8 || key == KEY_F9) {
+            catalog_file_action(&state, key == KEY_F8);
+        } else if (key == KEY_F5 || key == KEY_F6) {
+            ot_dos_settings_ui(&state.backup_form, &state.paths, state.settings_name, key == KEY_F5, dos_ui_line);
+        } else if (key == 'p' || key == 'P') {
+            (void)ot_dos_paths_form_ui(&state.paths, dos_ui_line);
+        } else if (key == 'f' || key == 'F') {
+            (void)ot_dos_backup_form_ui(&state.backup_form, dos_ui_line);
+        } else if (key == 'b' || key == 'B' || key == KEY_F7) {
+            struct ot_dos_backup_request request;
+            const struct ot_dos_backup_request *configured = 0;
+            if (state.backup_form.configured && ot_backup_form_request(&state.backup_form, &request))
+                configured = &request;
+            if (key == KEY_F7) ot_dos_backup_preview_ui(configured, dos_ui_line);
+            else if (ot_dos_backup_ui(state.alias, configured, dos_ui_line)) {
+                state.status_known = state.count = state.scanned = 0u;
+                memset(&state.status, 0, sizeof(state.status));
+#ifdef OT_NATIVE_TAPE_API
+                memset(&state.native_status, 0, sizeof(state.native_status));
+#endif
+                ot_catalog_free(&state.catalog);
+                state.phase = UI_IDLE;
+            }
+        } else if(key=='t' || key=='T') {
+#ifdef OT_NATIVE_TAPE_API
+            if(state.native_backend) {
+                ot_dos_native_controls_ui(state.alias,dos_ui_line);
+                /* Controls may have moved/replaced media. Drop UI snapshots,
+                 * never the driver's state, and require explicit new queries. */
+                state.status_known=0; state.count=state.scanned=0;
+                memset(&state.status,0,sizeof(state.status));
+                memset(&state.native_status,0,sizeof(state.native_status));
+                ot_catalog_free(&state.catalog);
+                state.catalog_cursor=state.catalog_left=0; state.export_phase=EXPORT_IDLE;
+            }
+#endif
         } else if (key == 'r' || key == 'R') {
             state.operation = UI_REWIND;
             state.phase = UI_CONFIRM;
@@ -515,9 +970,11 @@ static void show_ui(const char *alias, const char *export_name)
         } else continue;
         draw_device_ui(&state);
     }
+    free_file_selection(&state);
     ot_catalog_free(&state.catalog);
     end_input();
     clear_ui();
+    return 0;
 }
 
 static int print_device_entry(void *context, const struct ot_device_entry *entry)
@@ -611,16 +1068,10 @@ static const char *scan_error_reason(int rc)
 static int print_archive_entry(void *context, oa_u32 session, oa_u32 object,
                                 const struct ot_file_metadata *m)
 {
-    unsigned year = m->dos_date != 0u ? 1980u + (m->dos_date >> 9) : 0u;
     if (context != 0 && m->kind != OT_FILE_DIRECTORY &&
         ot_restore_selection_add((struct ot_restore_selection *)context, m->path) != 0)
         return -1;
-    return printf("%c %10lu %02X %04u-%02u-%02u %02u:%02u:%02u %lu:%lu %s\n",
-        m->kind == OT_FILE_DIRECTORY ? 'D' : 'F', (unsigned long)m->file_size,
-        (unsigned)m->dos_attributes, year, (unsigned)((m->dos_date >> 5) & 15u),
-        (unsigned)(m->dos_date & 31u), (unsigned)(m->dos_time >> 11),
-        (unsigned)((m->dos_time >> 5) & 63u), (unsigned)((m->dos_time & 31u) * 2u),
-        (unsigned long)session, (unsigned long)object, m->path) < 0 ? -1 : 0;
+    return ot_dos_list_entry(session, object, m);
 }
 
 static int verify_tape_session(const char *name, int listing, const char *selection_name)
@@ -811,7 +1262,7 @@ int main(int argc, char **argv)
             if (block == 0u) { usage(); return 1; }
             skip = 3;
         }
-        if (argc <= skip + 1 || (strcmp(argv[skip + 1], "--ui") != 0 && strcmp(argv[skip + 1], "--backup-file") != 0 && strcmp(argv[skip + 1], "--backup-tree") != 0 &&
+        if (argc <= skip + 1 || (strcmp(argv[skip + 1], "--ui") != 0 && strcmp(argv[skip + 1], "--backup-file") != 0 && strcmp(argv[skip + 1], "--backup-tree") != 0 && strcmp(argv[skip + 1], "--backup-set") != 0 &&
             strcmp(argv[skip + 1], "--read-test") != 0 && strcmp(argv[skip + 1], "--scan") != 0 &&
             strcmp(argv[skip + 1], "--verify") != 0 && strcmp(argv[skip + 1], "--list") != 0 &&
             strcmp(argv[skip + 1], "--restore") != 0 && strcmp(argv[skip + 1], "--compare") != 0)) { usage(); return 1; }
@@ -823,27 +1274,63 @@ int main(int argc, char **argv)
     if (argc > 1 && (strcmp(argv[1], "--native-status") == 0 ||
         strcmp(argv[1], "--native-ready") == 0 || strcmp(argv[1], "--native-rewind") == 0 ||
         strcmp(argv[1], "--native-space-records") == 0 || strcmp(argv[1], "--native-space-filemarks") == 0 ||
+        strcmp(argv[1], "--native-space-seq-filemarks") == 0 ||
+        strcmp(argv[1], "--native-space-setmarks") == 0 ||
+        strcmp(argv[1], "--native-space-seq-setmarks") == 0 ||
         strcmp(argv[1], "--native-eod") == 0 || strcmp(argv[1], "--native-load") == 0 ||
-        strcmp(argv[1], "--native-unload") == 0))
+        strcmp(argv[1], "--native-unload") == 0 ||
+        strcmp(argv[1], "--native-lock") == 0 ||
+        strcmp(argv[1], "--native-unlock") == 0 ||
+        strcmp(argv[1], "--native-alerts") == 0 ||
+        strcmp(argv[1], "--native-partitions") == 0 ||
+        strcmp(argv[1], "--native-position") == 0 ||
+        strcmp(argv[1], "--native-locate") == 0 ||
+        strcmp(argv[1], "--native-position64") == 0 ||
+        strcmp(argv[1], "--native-locate64") == 0))
         return ot_dos_native_command(argc, argv);
 #endif
     if (argc > 1 && strcmp(argv[1], "--ui") == 0) {
         const char *alias = "NRMT0";
-        const char *export_name = 0;
+        const char *export_name = 0, *preview_name = 0, *restore_name = 0, *compare_name = 0, *import_name = 0;
+        const char *catalog_input = 0;
+        struct ot_dos_backup_request backup;
         int i, seen_device = 0;
+        memset(&backup, 0, sizeof(backup));
         for (i = 2; i + 1 < argc; i += 2) {
             if (!seen_device && strcmp(argv[i], "--device") == 0) {
                 alias = argv[i + 1]; seen_device = 1;
             } else if (export_name == 0 && strcmp(argv[i], "--selection-out") == 0)
                 export_name = argv[i + 1];
+            else if (preview_name == 0 && strcmp(argv[i], "--preview-to") == 0)
+                preview_name = argv[i + 1];
+            else if (restore_name == 0 && strcmp(argv[i], "--restore-to") == 0)
+                restore_name = argv[i + 1];
+            else if (compare_name == 0 && strcmp(argv[i], "--compare-to") == 0)
+                compare_name = argv[i + 1];
+            else if (import_name == 0 && strcmp(argv[i], "--selection-in") == 0)
+                import_name = argv[i + 1];
+            else if (catalog_input == 0 && strcmp(argv[i], "--catalog-in") == 0)
+                catalog_input = argv[i + 1];
+            else if (backup.source == 0 && (strcmp(argv[i], "--backup-file") == 0 || strcmp(argv[i], "--backup-tree") == 0 || strcmp(argv[i], "--backup-set") == 0)) {
+                backup.source = argv[i + 1]; backup.tree = strcmp(argv[i], "--backup-set") == 0 ? OT_BACKUP_SET : strcmp(argv[i], "--backup-tree") == 0;
+            } else if (backup.path == 0 && strcmp(argv[i], "--as") == 0) backup.path = argv[i + 1];
+            else if (backup.volume == 0 && strcmp(argv[i], "--volume") == 0) backup.volume = argv[i + 1];
             else break;
         }
         if (i != argc || !ot_probe_raw_name_valid(alias) ||
-            (export_name != 0 && (*export_name == 0 || strlen(export_name) > UI_EXPORT_PATH_MAX))) {
+            (catalog_input != 0 && !ot_local_file_name_valid(catalog_input, 40u)) ||
+            (export_name != 0 && (*export_name == 0 || !ot_paths_form_value_valid(export_name))) ||
+            (preview_name != 0 && (*preview_name == 0 || !ot_paths_form_value_valid(preview_name))) ||
+            (restore_name != 0 && (*restore_name == 0 || !ot_paths_form_value_valid(restore_name))) ||
+            (compare_name != 0 && (*compare_name == 0 || !ot_paths_form_value_valid(compare_name))) ||
+            (import_name != 0 && (*import_name == 0 || !ot_paths_form_value_valid(import_name))) ||
+            ((backup.source != 0 || backup.path != 0 || backup.volume != 0) &&
+             (!ot_dos_backup_request_valid(&backup) || strlen(backup.source) > UI_EXPORT_PATH_MAX ||
+              strlen(backup.path) > UI_EXPORT_PATH_MAX))) {
             usage(); return 1;
         }
-        show_ui(alias, export_name);
-        return 0;
+        return show_ui(alias, export_name, preview_name, restore_name, compare_name, import_name,
+            backup.source != 0 ? &backup : 0, catalog_input);
     }
 
     if (argc > 1 && strcmp(argv[1], "--devices") == 0) {
@@ -888,17 +1375,26 @@ int main(int argc, char **argv)
     }
 
     if (argc > 1 && strcmp(argv[1], "--list") == 0) {
-        const char *device = "NRMT0", *out = 0;
+        const char *device = "NRMT0", *out = 0, *catalog_input = 0, *catalog_output = 0;
         int i, seen_device = 0;
         for (i = 2; i < argc; i += 2) {
             if (i + 1 >= argc) break;
             if (strcmp(argv[i], "--device") == 0 && !seen_device) {
                 device = argv[i + 1]; seen_device = 1;
             } else if (strcmp(argv[i], "--selection-out") == 0 && out == 0) out = argv[i + 1];
+            else if (strcmp(argv[i], "--catalog-in") == 0 && catalog_input == 0) catalog_input = argv[i + 1];
+            else if (strcmp(argv[i], "--catalog-out") == 0 && catalog_output == 0) catalog_output = argv[i + 1];
             else break;
         }
-        if (i == argc && ot_probe_name_valid(device) && (device[1] == 'R' || device[1] == 'r'))
+        if (i == argc && ot_probe_raw_name_valid(device) &&
+            !(catalog_input != 0 && (catalog_output != 0 || out != 0 || seen_device)) &&
+            !(catalog_output != 0 && out != 0) &&
+            (catalog_input == 0 || ot_local_file_name_valid(catalog_input, 40u)) &&
+            (catalog_output == 0 || ot_local_file_name_valid(catalog_output, 40u))) {
+            if (catalog_input != 0 || catalog_output != 0)
+                return ot_dos_catalog_list(catalog_input, catalog_output, device);
             return verify_tape_session(device, 1, out);
+        }
         usage(); return 1;
     }
 
@@ -908,11 +1404,12 @@ int main(int argc, char **argv)
         return rc;
     }
 
-    if (argc > 1 && (strcmp(argv[1], "--backup-file") == 0 || strcmp(argv[1], "--backup-tree") == 0)) {
+    if (argc > 1 && (strcmp(argv[1], "--backup-file") == 0 || strcmp(argv[1], "--backup-tree") == 0 || strcmp(argv[1], "--backup-set") == 0)) {
         if (argc == 10 && strcmp(argv[3], "--as") == 0 &&
             strcmp(argv[5], "--device") == 0 && strcmp(argv[7], "--overwrite") == 0 &&
             strcmp(argv[8], "--volume") == 0)
-            return ot_dos_backup(argv[2], argv[4], argv[6], argv[9], strcmp(argv[1], "--backup-tree") == 0);
+            return ot_dos_backup(argv[2], argv[4], argv[6], argv[9],
+                strcmp(argv[1], "--backup-set") == 0 ? OT_BACKUP_SET : strcmp(argv[1], "--backup-tree") == 0);
         usage();
         return 1;
     }
@@ -955,7 +1452,7 @@ int main(int argc, char **argv)
     if (argc > 1) {
         usage();
     } else {
-        show_ui("NRMT0", 0);
+        return show_ui("NRMT0", 0, 0, 0, 0, 0, 0, 0);
     }
     return 0;
 }

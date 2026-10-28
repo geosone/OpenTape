@@ -55,6 +55,11 @@ static int emit(struct ot_archive_writer *w, oa_u16 type, oa_u32 object,
         return accepted > total ? OT_WRITER_BAD_COUNT : OT_WRITER_SHORT_WRITE;
     }
     w->verified = next;
+    if (w->observer != 0) {
+        w->busy = 1u;
+        w->observer(w->observer_context, &w->verified, &r, w->buffer + OT_WRITER_RECORD_OVERHEAD);
+        w->busy = 0u;
+    }
     return OT_FORMAT_OK;
 }
 
@@ -71,6 +76,15 @@ int ot_archive_writer_init(struct ot_archive_writer *w,
     w->capacity = capacity;
     w->initialized = 1u;
     return OT_FORMAT_OK;
+}
+
+int ot_archive_writer_observe(struct ot_archive_writer *w, ot_writer_observer observer, void *context)
+{
+    int rc = ready(w);
+    if (rc != 0) return rc;
+    if (w->verified.framing.blocks != 0ul) return OT_WRITER_BAD_ARGUMENT;
+    w->observer = observer; w->observer_context = context;
+    return 0;
 }
 
 int ot_archive_writer_volume(struct ot_archive_writer *w, const struct ot_volume_label *label)

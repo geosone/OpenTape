@@ -12,6 +12,7 @@
 #include "opentape/backup_plan.h"
 #include "opentape/restore.h"
 #include "opentape/messages.h"
+#include "opentape/local_name.h"
 #ifdef OT_NATIVE_TAPE_API
 #include "opentape/native_tape.h"
 #endif
@@ -143,6 +144,62 @@ static void native_dos_ops(struct ot_native_ops *ops, struct ot_dos_native_sessi
     ops->query = native_dos_query;
     ops->close = native_dos_close;
 }
+#ifdef OT_NATIVE_TAPE_POSITION
+static unsigned native_dos_position(void *context, struct ot_tape_position_v1 *packet)
+{
+    struct ot_dos_native_session *s=(struct ot_dos_native_session *)context;
+    return dos_ioctl(0,s->handle,OT_TAPE_API_CATEGORY,OT_TAPE_API_POSITION,packet,sizeof(*packet));
+}
+int ot_dos_native_position(const char *name, struct ot_tape_position_v1 *packet, unsigned *error)
+{
+    struct ot_dos_native_session session;
+    struct ot_native_position_ops ops;
+    native_dos_ops(&ops.query,&session); ops.position=native_dos_position;
+    return ot_native_position(&ops,name,packet,error);
+}
+#endif
+#ifdef OT_NATIVE_TAPE_LOCATE
+static unsigned native_dos_locate(void *context,struct ot_tape_locate_v1 *packet)
+{
+    struct ot_dos_native_session *s=(struct ot_dos_native_session *)context;
+    return dos_ioctl(0,s->handle,OT_TAPE_API_CATEGORY,OT_TAPE_API_LOCATE,packet,sizeof(*packet));
+}
+int ot_dos_native_locate(const char *name,oa_u16 flags,oa_u32 partition,oa_u32 block,
+                         struct ot_tape_locate_v1 *packet,unsigned *error)
+{
+    struct ot_dos_native_session session;
+    struct ot_native_locate_ops ops;
+    native_dos_ops(&ops.query,&session); ops.locate=native_dos_locate;
+    return ot_native_locate(&ops,name,flags,partition,block,packet,error);
+}
+#endif
+#ifdef OT_NATIVE_TAPE_WIDE
+static unsigned native_dos_position64(void *context, struct ot_tape_position64_v1 *packet)
+{
+    struct ot_dos_native_session *s=(struct ot_dos_native_session *)context;
+    return dos_ioctl(0,s->handle,OT_TAPE_API_CATEGORY,OT_TAPE_API_POSITION,packet,sizeof(*packet));
+}
+int ot_dos_native_position64(const char *name, struct ot_tape_position64_v1 *packet, unsigned *error)
+{
+    struct ot_dos_native_session session;
+    struct ot_native_position64_ops ops;
+    native_dos_ops(&ops.query,&session); ops.position=native_dos_position64;
+    return ot_native_position64(&ops,name,packet,error);
+}
+static unsigned native_dos_locate64(void *context,struct ot_tape_locate64_v1 *packet)
+{
+    struct ot_dos_native_session *s=(struct ot_dos_native_session *)context;
+    return dos_ioctl(0,s->handle,OT_TAPE_API_CATEGORY,OT_TAPE_API_LOCATE,packet,sizeof(*packet));
+}
+int ot_dos_native_locate64(const char *name,oa_u16 flags,oa_u32 partition,oa_u32 block,oa_u32 block_high,
+                         struct ot_tape_locate64_v1 *packet,unsigned *error)
+{
+    struct ot_dos_native_session session;
+    struct ot_native_locate64_ops ops;
+    native_dos_ops(&ops.query,&session); ops.locate=native_dos_locate64;
+    return ot_native_locate64(&ops,name,flags,partition,block,block_high,packet,error);
+}
+#endif
 int ot_dos_native_probe(const char *name, oa_u16 flags, struct ot_tape_info_v1 *info, unsigned *error)
 {
     struct ot_dos_native_session session;
@@ -249,6 +306,10 @@ int ot_dos_native_writer_flush(struct ot_dos_native_writer *w)
 { return w == 0 ? OT_NATIVE_ARGUMENT : ot_native_writer_flush(&w->writer); }
 int ot_dos_native_writer_filemark(struct ot_dos_native_writer *w)
 { return w == 0 ? OT_NATIVE_ARGUMENT : ot_native_writer_filemark(&w->writer); }
+#ifdef OT_NATIVE_TAPE_WRITE_SETMARK
+int ot_dos_native_writer_setmark(struct ot_dos_native_writer *w)
+{ return w == 0 ? OT_NATIVE_ARGUMENT : ot_native_writer_setmark(&w->writer); }
+#endif
 int ot_dos_native_writer_finish(struct ot_dos_native_writer *w)
 { return w == 0 ? OT_NATIVE_ARGUMENT : ot_native_writer_finish(&w->writer); }
 int ot_dos_native_writer_abort(struct ot_dos_native_writer *w)
@@ -403,12 +464,19 @@ int ot_dos_source_open(struct ot_dos_source *s, const char *name, const char *pa
 {
     critical_vector old;
     int handle;
-    unsigned error, flags;
-    oa_u8 encoded[OT_FILE_METADATA_PREFIX + OT_FILE_PATH_MAX];
+    unsigned error, flags, length;
+    union { oa_u8 encoded[OT_FILE_METADATA_PREFIX + OT_FILE_PATH_MAX]; char canonical[128]; } scratch;
     oa_u16 size;
     if (s == 0 || s->opened || name == 0 || strlen(name) >= sizeof(s->name) ||
-        strchr(name, '*') != 0 || strchr(name, '?') != 0 || !ot_archive_path_valid(path))
+        strchr(name, '*') != 0 || strchr(name, '?') != 0 || ot_local_tape_name(name) || !ot_archive_path_valid(path))
         return OT_SOURCE_ARGUMENT;
+    /* Resolve dot/parent components before applying the same device-stem
+     * rule. Reuse codec scratch storage; recursive tree planning stays bounded. */
+    if (_fullpath(scratch.canonical, name, sizeof(scratch.canonical)) == 0) return OT_SOURCE_ARGUMENT;
+    length = (unsigned)strlen(scratch.canonical);
+    while (length > 3u && (scratch.canonical[length - 1u] == '\\' || scratch.canonical[length - 1u] == '/'))
+        scratch.canonical[--length] = 0;
+    if (ot_local_tape_name(scratch.canonical)) return OT_SOURCE_ARGUMENT;
     memset(s, 0, sizeof(*s));
     strcpy(s->name, name);
     strcpy(s->metadata.path, path);
@@ -422,7 +490,7 @@ int ot_dos_source_open(struct ot_dos_source *s, const char *name, const char *pa
     if (error == 0u && (flags & 0x80u) != 0u) error = 5u;
     if (error == 0u) error = source_snapshot(s, &s->metadata);
     s->dos_error = error;
-    if (error != 0u || ot_file_metadata_encode(encoded, sizeof(encoded), &s->metadata, &size) != 0) {
+    if (error != 0u || ot_file_metadata_encode(scratch.encoded, sizeof(scratch.encoded), &s->metadata, &size) != 0) {
         source_close(s);
         return OT_SOURCE_IO;
     }
@@ -534,7 +602,7 @@ int ot_dos_plan_tree(struct ot_backup_plan *plan, const char *name, const char *
     if (plan == 0 || plan->count != 0u || name == 0 || name[0] == 0 ||
         strlen(name) >= sizeof(disk) || dos_error == 0 ||
         strchr(name, '*') != 0 || strchr(name, '?') != 0 || !ot_archive_path_valid(path) ||
-        _fullpath(disk, name, sizeof(disk)) == 0) return OT_SOURCE_ARGUMENT;
+        _fullpath(disk, name, sizeof(disk)) == 0 || ot_local_tape_name(disk)) return OT_SOURCE_ARGUMENT;
     *dos_error = 0u;
     old = fail_begin();
     error = _dos_getfileattr(disk, &flags);
@@ -603,7 +671,7 @@ static unsigned restore_directory(void *p, const struct ot_file_metadata *m)
     struct ot_dos_restore *r = p;
     char path[128];
     unsigned error = restore_path(r, m->path, path, 1u);
-    if (error == 0u && r->preview && printf("DIR %10lu %s\n", 0ul, m->path) < 0)
+    if (error == 0u && r->preview && !r->quiet && printf("DIR %10lu %s\n", 0ul, m->path) < 0)
         error = restore_error(r, 29u);
     return error;
 }
@@ -626,7 +694,7 @@ static unsigned restore_begin(void *p, const struct ot_file_metadata *m)
     if (error == 0u) {
         if ((flags & 0x10u) != 0u) return restore_error(r, 5u);
         if (selected == 0u) {
-            if (r->preview && printf("KEEP %10lu %s\n", (unsigned long)m->file_size, m->path) < 0)
+            if (r->preview && !r->quiet && printf("KEEP %10lu %s\n", (unsigned long)m->file_size, m->path) < 0)
                 return restore_error(r, 29u);
             return OT_RESTORE_SKIP;
         }
@@ -755,6 +823,87 @@ int ot_dos_selection_save(struct ot_dos_selection_export *out, const struct ot_r
     return ot_restore_selection_save(list, &ops);
 }
 
+/* Common independent readback for both small blobs and streamed metadata.
+ * ot_source_verify owns EOF/recheck/close; rename occurs only after success. */
+static int selection_readback_publish(struct ot_dos_selection_export *out, oa_u32 size, oa_u32 crc)
+{
+    struct ot_dos_source source;
+    oa_u8 buffer[256];
+    int rc;
+    memset(&source, 0, sizeof(source));
+    rc = ot_dos_source_open(&source, out->temporary, "VERIFY.TMP");
+    if (rc == 0) rc = ot_source_verify(&source.ops, size, crc, buffer, sizeof(buffer));
+    if (source.dos_error != 0u) out->dos_error = source.dos_error;
+    if (rc != 0) return rc;
+    return selection_publish(out) != 0u ? OT_RESTORE_IO : 0;
+}
+
+/* Generic small profile publication shares selection export's DOS guards and
+ * staging name, adding independent length/CRC/readback before the rename. */
+int ot_dos_file_save_blob(struct ot_dos_selection_export *out, const oa_u8 *data, unsigned size)
+{
+    unsigned accepted, error;
+    int handle, rc;
+    critical_vector old;
+    if (out == 0 || data == 0 || size == 0u || size > 4096u) return OT_RESTORE_PATH;
+    old = fail_begin();
+    out->dos_error = _dos_creatnew(out->temporary, 0u, &handle);
+    _dos_setvect(0x24, old);
+    if (out->dos_error != 0u) return OT_RESTORE_IO;
+    out->handle = (unsigned)handle;
+    error = selection_write(out, data, size, &accepted);
+    rc = error != 0u ? OT_RESTORE_IO : 0;
+    error = selection_close(out);
+    if (rc == 0 && error != 0u) rc = OT_RESTORE_IO;
+    if (rc != 0) return rc;
+    return selection_readback_publish(out, (oa_u32)size, ot_crc32(data, (oa_u16)size));
+}
+
+/* Streaming metadata uses the same exclusive paths as small profile output.
+ * Counts are 32-bit; every DOS transfer remains inside one small chunk. */
+static unsigned stream_write(void *p, const oa_u8 *data, unsigned size, unsigned *accepted)
+{
+    struct ot_dos_file_stream *s = p;
+    unsigned error;
+    *accepted = 0u;
+    if (!s->opened || s->bytes > 131072ul || (oa_u32)size > 131072ul - s->bytes) return 87u;
+    error = selection_write(&s->file, data, size, accepted);
+    if (!error) { s->bytes += size; s->crc = ot_crc32_extend(s->crc, data, (oa_u16)size); }
+    return error;
+}
+static unsigned stream_close(void *p)
+{
+    struct ot_dos_file_stream *s = p;
+    if (!s->opened) return 6u;
+    s->opened = 0u;
+    return selection_close(&s->file);
+}
+static unsigned stream_publish(void *p)
+{
+    struct ot_dos_file_stream *s = p;
+    if (s->opened || s->file.dos_error) return 6u;
+    s->result = selection_readback_publish(&s->file, s->bytes, s->crc);
+    return s->result ? (s->file.dos_error ? s->file.dos_error : 23u) : 0u;
+}
+
+int ot_dos_file_stream_open(struct ot_dos_file_stream *s, const char *name)
+{
+    int handle, rc;
+    critical_vector old;
+    if (s == 0) return OT_RESTORE_PATH;
+    memset(s, 0, sizeof(*s));
+    rc = ot_dos_selection_prepare(&s->file, name);
+    if (rc) return rc;
+    old = fail_begin();
+    s->file.dos_error = _dos_creatnew(s->file.temporary, 0u, &handle);
+    _dos_setvect(0x24, old);
+    if (s->file.dos_error) return OT_RESTORE_IO;
+    s->file.handle = (unsigned)handle; s->opened = 1u;
+    s->ops.context = s; s->ops.write = stream_write;
+    s->ops.close = stream_close; s->ops.publish = stream_publish;
+    return 0;
+}
+
 static unsigned remove_previous(const char *path)
 {
     union REGS in, out;
@@ -804,12 +953,12 @@ static unsigned restore_commit(void *p, const struct ot_file_metadata *m)
     if (r->comparing) {
         error = restore_path(r, m->path, path, 0u);
         if (error == 0u) error = verify_disk_file(r, m, path);
-        if (error == 0u && printf("MATCH %10lu %s\n", (unsigned long)m->file_size, m->path) < 0)
+        if (error == 0u && !r->quiet && printf("MATCH %10lu %s\n", (unsigned long)m->file_size, m->path) < 0)
             error = restore_error(r, 29u);
         return error;
     }
     if (r->preview) {
-        if (printf("%s %10lu %s\n", r->replacing ? "REPLACE" : "NEW",
+        if (!r->quiet && printf("%s %10lu %s\n", r->replacing ? "REPLACE" : "NEW",
                    (unsigned long)m->file_size, m->path) < 0) return restore_error(r, 29u);
         if (r->replacing) ++r->replaced;
         return 0u;
@@ -852,6 +1001,7 @@ static int restore_open(struct ot_dos_restore *r, const char *name,
     memset(r, 0, sizeof(*r));
     r->preview = preview;
     r->comparing = mode == 2u;
+    r->quiet = mode == 3u;
     r->selection = selection; r->selection_count = count;
     if (_fullpath(r->root, name, sizeof(r->root)) == 0 || r->root[1] != ':' || r->root[2] != '\\' ||
         strlen(r->root) + strlen(OT_RESTORE_TEMP) + 2u > sizeof(r->temporary)) return OT_RESTORE_PATH;
@@ -860,7 +1010,7 @@ static int restore_open(struct ot_dos_restore *r, const char *name,
     if (!ot_archive_path_valid(relative)) return OT_RESTORE_PATH;
     error = path_attributes(r->root, &flags);
     if (error == 0u) {
-        if ((!r->comparing && count == 0u) || (flags & 0x10u) == 0u) return (int)restore_error(r, 80u);
+        if ((!r->comparing && !r->quiet && count == 0u) || (flags & 0x10u) == 0u) return (int)restore_error(r, 80u);
     } else {
         if (r->comparing) return (int)restore_error(r, error);
         if (error != 2u && error != 3u) return (int)restore_error(r, error);
@@ -870,7 +1020,10 @@ static int restore_open(struct ot_dos_restore *r, const char *name,
             if (last == relative + 2) last[1] = 0; else *last = 0;
             error = path_attributes(relative, &flags);
             if (error == 0u && (flags & 0x10u) == 0u) error = 3u;
-        } else error = make_directory(r->root);
+        } else {
+            error = make_directory(r->root);
+            if (error == 0u) r->root_created = 1u;
+        }
         if (error != 0u) return (int)restore_error(r, error);
     }
     r->created = 1u;
@@ -895,6 +1048,9 @@ int ot_dos_restore_preview(struct ot_dos_restore *r, const char *name,
                             const char *const *selection, unsigned count)
 { return restore_open(r, name, selection, count, 1u); }
 
+int ot_dos_restore_inspect(struct ot_dos_restore *r, const char *name)
+{ return restore_open(r, name, 0, 0u, 3u); }
+
 int ot_dos_restore_compare(struct ot_dos_restore *r, const char *name)
 { return restore_open(r, name, 0, 0u, 2u); }
 
@@ -902,3 +1058,33 @@ int ot_dos_restore_create(struct ot_dos_restore *r, const char *name)
 {
     return ot_dos_restore_open(r, name, 0, 0u);
 }
+
+#ifdef OT_NATIVE_TAPE_PARTITIONS
+static unsigned native_dos_partitions(void *context, struct ot_tape_partitions_v1 *packet)
+{
+    struct ot_dos_native_session *s=(struct ot_dos_native_session *)context;
+    return dos_ioctl(0,s->handle,OT_TAPE_API_CATEGORY,OT_TAPE_API_PARTITIONS,packet,sizeof(*packet));
+}
+int ot_dos_native_partitions(const char *name, struct ot_tape_partitions_v1 *packet, unsigned *error)
+{
+    struct ot_dos_native_session session;
+    struct ot_native_partitions_ops ops;
+    native_dos_ops(&ops.query,&session); ops.partitions=native_dos_partitions;
+    return ot_native_partitions(&ops,name,packet,error);
+}
+#endif
+
+#ifdef OT_NATIVE_TAPE_ALERTS
+static unsigned native_dos_alerts(void *context, struct ot_tape_alerts_v1 *packet)
+{
+    struct ot_dos_native_session *s=(struct ot_dos_native_session *)context;
+    return dos_ioctl(0,s->handle,OT_TAPE_API_CATEGORY,OT_TAPE_API_ALERTS,packet,sizeof(*packet));
+}
+int ot_dos_native_alerts(const char *name,oa_u16 flags, struct ot_tape_alerts_v1 *packet, unsigned *error)
+{
+    struct ot_dos_native_session session;
+    struct ot_native_alerts_ops ops;
+    native_dos_ops(&ops.query,&session); ops.alerts=native_dos_alerts;
+    return ot_native_alerts(&ops,name,flags,packet,error);
+}
+#endif

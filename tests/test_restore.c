@@ -220,17 +220,59 @@ static void test_filter(void)
     ot_restore_free(&s);
     puts("OpenTape selective restore tests passed");
 }
+struct observations { unsigned calls; oa_u32 bytes; };
+static void observe_restore(void *context, const struct ot_restore *state)
+{
+    struct observations *seen = context;
+    struct ot_restore *mutable_state = (struct ot_restore *)state;
+    assert(state->busy && !state->finished && !state->failed);
+    assert(state->restored_files == (oa_u32)f.commits);
+    assert(state->active_bytes <= state->active.file_size);
+    assert(state->checked_high == 0ul && state->checked_low >= seen->bytes);
+    seen->bytes = state->checked_low; ++seen->calls;
+    assert(ot_restore_finish(mutable_state) == OT_RESTORE_FAILED);
+    assert(ot_restore_block(mutable_state, f.block[0], (oa_u16)f.sizes[0]) == OT_RESTORE_FAILED);
+    assert(ot_restore_observe(mutable_state, 0, 0) == OT_RESTORE_FAILED);
+    ot_restore_free(mutable_state); /* Must not free/abort while observed. */
+}
+static void test_combined_observation(void)
+{
+    struct ot_restore state;
+    struct ot_restore_ops ops;
+    struct observations seen;
+    struct ot_block_header header;
+    oa_u8 combined[512], payload[512];
+    unsigned i, used = 0u;
+    fixture(5u); memset(&state, 0, sizeof(state)); memset(&seen, 0, sizeof(seen));
+    ops.context = &f; ops.directory = directory; ops.begin = begin; ops.write = write_data; ops.commit = commit; ops.abort = abort_file;
+    assert(ot_restore_init(&state, &ops) == 0);
+    assert(ot_restore_observe(&state, observe_restore, &seen) == 0);
+    for (i = 0u; i < 3u; ++i) assert(ot_restore_block(&state, f.block[i], (oa_u16)f.sizes[i]) == 0);
+    for (i = 3u; i < 6u; ++i) {
+        memcpy(payload + used, f.block[i] + OT_BLOCK_HEADER_SIZE, f.sizes[i] - OT_BLOCK_HEADER_SIZE);
+        used += f.sizes[i] - OT_BLOCK_HEADER_SIZE;
+    }
+    memset(&header, 0, sizeof(header)); header.block_number = 3ul; header.session_id = 1ul; header.record_count = 3u;
+    assert(ot_block_encode(combined, sizeof(combined), &header, payload, (oa_u16)used) == 0);
+    assert(ot_restore_block(&state, combined, (oa_u16)(OT_BLOCK_HEADER_SIZE + used)) == OT_RESTORE_IO);
+    assert(seen.calls == 3u && state.checked_low == 0ul && f.writes == 1u && !f.commits);
+    ot_restore_free(&state); assert(f.aborts == 1u);
+}
 int main(void)
 {
     struct ot_restore s;
     struct ot_restore_ops ops;
     unsigned test, i;
+    struct observations seen;
     int rc;
+    assert(ot_restore_observe(0, 0, 0) == OT_FORMAT_BAD_ARGUMENT);
+    test_combined_observation();
     for (test = 0u; test < 17u; ++test) {
-        fixture(test); memset(&s, 0, sizeof(s));
+        fixture(test); memset(&s, 0, sizeof(s)); memset(&seen, 0, sizeof(seen));
         ops.context = &f; ops.directory = directory; ops.begin = begin; ops.write = write_data;
         ops.commit = commit; ops.abort = abort_file;
         assert(ot_restore_init(&s, &ops) == 0);
+        assert(ot_restore_observe(&s, observe_restore, &seen) == 0);
         if (test == 1u) f.block[4][60] ^= 1u;
         if (test == 2u || test == 16u) {
             /* Valid record/block checksums, deliberately wrong whole-file CRC. */
@@ -241,7 +283,10 @@ int main(void)
             rc = ot_restore_block(&s, f.block[i], (oa_u16)f.sizes[i]);
             if (rc != 0) break;
         }
+        assert(seen.calls == i);
+        assert(ot_restore_observe(&s, 0, 0) != 0);
         if (test == 0u || test == 11u || test == 14u || test == 15u) {
+            assert(s.checked_low == 5ul && s.checked_high == 0ul);
             assert(rc == 0 && f.commits == (test == 11u ? 3u : test == 14u ? 1u : test == 15u ? 0u : 2u) && f.dirs == 1u);
             assert(ot_restore_finish(&s) == 0 && s.finished);
             assert(s.restored_files == f.commits && s.restored_directories == 1ul);

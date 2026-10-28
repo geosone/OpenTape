@@ -83,7 +83,7 @@ for each record. A malformed request is rejected before submission; a failed
 read latches the reader, and further reads submit nothing until explicit close.
 
 `OT_NATIVE_OK` means a completed ordinary record. `OT_NATIVE_STREAM` means a
-completed read with FILEMARK/EOM/ILI/EOD: inspect `reader.last` for both actual
+completed read with FILEMARK/SETMARK/EOM/ILI/EOD: inspect `reader.last` for both actual
 bytes and stream flags. FILEMARK may accompany data in the same result, without
 an extra synthetic EOF response. A zero-length ordinary record is not a
 filemark. Actual bytes are usable only with `OT_TAPE_COUNT_VALID`. A negative
@@ -178,7 +178,8 @@ See OpenASPI's `docs/native-tape-fixed.md` for the full wire and count contract.
 ## Relative positioning and EOD
 
 `ot_native_space` and `ot_dos_native_space` add signed record/filemark movement
-and EOD using CONTROL operations 7..9. A conditional count DWORD occupies
+and EOD using CONTROL operations 7..9; operations 14..16 add consecutive
+filemarks, setmarks and consecutive setmarks. A conditional count DWORD occupies
 packet offset `20h`, leaving the size at 64 and version at `0100h`. Provider
 bits `0800h`/`1000h`/`2000h` are checked individually; older providers submit
 no movement. Replies must echo the count, including BUSY/error replies.
@@ -220,7 +221,7 @@ OPENTAPE --native-rewind --device NRMT0
 `ot_native_execute` and its DOS wrapper now accept LOAD (10, capability
 `4000h`) and UNLOAD (11, `8000h`). Each issues one synchronous sequential
 `1Bh` command with zero count/flags/block size. The complete current provider
-mask is `0000FFFFh`; individual bits still describe provider support, not
+mask, including removal controls below, is `1FFFFFFFh`; individual bits still describe provider support, not
 confirmed drive capabilities. No implicit readiness check, rewind, marks,
 retension or retry occurs. Successful media completion (`0003h`) claims
 neither BOT nor readiness. A physically missing cartridge still needs manual
@@ -238,3 +239,266 @@ media command reports `0005h`, retains FAILED, and is never replayed.
 DOS images with a memory-only manager; see [testing](testing.md). Physical-drive
 and Windows behavior remain unqualified. OpenASPI's `docs/native-tape-media.md`
 defines the full wire and recovery contract.
+
+## Native cartridge removal control
+
+```text
+OPENTAPE --native-lock --device NRMT0
+OPENTAPE --native-unlock --device NRMT0
+```
+
+LOCK (12, provider capability `00010000h`) and UNLOCK (13, `00020000h`)
+use the existing `ot_native_execute` and DOS wrapper. The complete provider
+mask is now `1FFFFFFFh`; retain the full DWORD rather than truncating to a WORD.
+They each submit one synchronous six-byte `1Eh` PREVENT/ALLOW MEDIUM REMOVAL
+command, without data, retries or other media operations.
+
+These commands control cartridge removal, independently of write protection
+and native writer claims. Active writers/multiple handles/legacy buffered or
+written state remain BUSY. Abandoned FAILED/DIRTY|FAILED native state survives
+successful and failed removal commands. Success has completion `0003h`, failure
+`0001h`: failed LOCK/UNLOCK introduces neither POSITION_UNKNOWN nor native
+FAILED because it does not move tape. No cached lock state is invented after
+an ambiguous command failure. A successful command preserves queued legacy
+EOF. Rewind does not implicitly unlock the drive. Failed explicit UNLOAD still
+uses the existing media-command uncertainty rules.
+
+A build against older provider headers reports that removal controls require
+a newer SDK, without opening a device or interpreting the verb as READY. A
+matching-header build checks each operation's individual capability bit, so
+older running providers fail as unsupported before a control submission.
+`dos-native-lock-smoke` covers strict packets, high-WORD bits, ownership,
+clean/dirty abandoned writers, prevented UNLOAD, legacy EOF, error classes and
+localized CLI behavior. OpenASPI's `docs/native-tape-removal.md` has the wire
+contract. Physical-drive qualification and automatic locking around archive
+jobs remain pending.
+
+## Non-moving logical position observation
+
+```text
+OPENTAPE --native-position --device NRMT0
+```
+
+The optional `ot_native_position` / `ot_dos_native_position` API uses a separate
+64-byte position packet and DOS function 4. Capability `00040000h` brings the
+complete current provider mask to `1FFFFFFFh`. Each query submits one ten-byte
+READ POSITION (`34h`) in short logical form; no movement, flush, mark, retry,
+implicit LOCATE or six-byte vendor fallback occurs.
+
+Verified replies expose partition and both full unsigned 32-bit logical object
+locations. These are device coordinates, not byte offsets or archive file IDs.
+Raw BOP/EOP describe the reported partition and do not claim native rewind
+completion. BPU/LOLU and PERR suppress coordinate validity; zero without validity
+is unknown. Buffer counts are not exposed. The short format has a 32-bit limit;
+larger formats remain pending; explicit LOCATE(10) is described below.
+
+A negotiated residual must prove the complete 20-byte response. Short/malformed
+or missing residual reports return a checked command error. A legacy manager
+without residual support returns PARTIAL/INCOMPLETE with UNVERIFIED_LENGTH and
+no coordinates. Successful hardware observation may also report unknown
+position; the SDK returns PARTIAL and the CLI exits 2 when no verified location
+is available. A valid address prints normally with CLI exit 0.
+
+Active writers, legacy buffered/written/error state, pending rewind and multiple
+handles remain BUSY. Retained native FAILED/DIRTY|FAILED is inspectable but never
+cleared by a reported address. Legacy diagnostics and queued EOF are preserved.
+A failed observation does not introduce POSITION_UNKNOWN or native FAILED.
+Current/deferred sense is decoded after the actual ten-byte CDB rather than at
+the six-byte offset. Builds against older SDK headers reject the new verb
+without opening a device. `dos-native-position-smoke` covers the provider, SDK
+and localized CLI; see [testing](testing.md). OpenASPI's
+`docs/native-tape-position.md` defines the wire contract and references.
+
+## Explicit logical LOCATE(10)
+
+```text
+OPENTAPE --native-locate 12345 --device NRMT0
+OPENTAPE --native-locate 4294967295 --partition 2 --device NRMT0
+OPENTAPE --native-position --device NRMT0
+```
+
+`ot_native_locate` and `ot_dos_native_locate` use a separate 64-byte target
+packet (DOS function 5). Capability `00080000h` brings the current mask to
+`1FFFFFFFh`. Addresses are unsigned 32-bit logical objects, not byte offsets
+or archive file IDs. Flags 0 select the current partition and require request
+partition zero; `OT_TAPE_LOCATE_PARTITION` explicitly selects partition 0..255.
+The caller establishes that an explicit target partition exists. No automatic
+partition probe, creation or selection is added. A drive may flush its own
+pending buffer during LOCATE; no separate flush command is submitted.
+
+Exactly one synchronous ten-byte LOCATE (`2Bh`) is submitted without data,
+IMMED, BT, readiness/position probes, flush, mark, retry or rewind/SPACE fallback.
+The SDK checks character-device identity, the individual capability, clean
+session state, guarded packet bounds and the exact echoed target, then closes
+once while preserving the first error. Old SDK-header builds reject the new
+verb without a device open. Decimal operands reject signs, overflow, missing
+and duplicate options before I/O. `--partition` belongs only to LOCATE.
+
+Active writers, legacy buffered/written/error state, cached data, multiple
+handles, pending rewind and retained native DIRTY/FAILED remain BUSY. Success
+has completion `0003h`, clean state and no BOT claim, even for target block 0.
+Successful movement clears queued legacy EOF. Failure has `0005h`, diagnostics
+and native FAILED; even a valid later READ POSITION does not authorize another
+movement or native data I/O. Explicit successful native REWIND is still the
+recovery operation. It does not force partition 0: the historical BOT flag
+means the selected partition's beginning. The CLI now makes this distinction.
+
+`dos-native-locate-smoke` checks cursor/partition readback independently through
+READ POSITION, unsigned limits, invalid packets, active/abandoned writers,
+legacy EOF, ambiguous failed movement with altered cursor, first-error cleanup,
+fixed/descriptor/deferred sense, exact commands and both languages. See
+[testing](testing.md) and OpenASPI's `docs/native-tape-locate.md` for qualification
+and the complete contract. Wide bindings are described below; verified emulation, archive resume and
+physical-drive qualification remain pending.
+
+## 64-bit logical positioning
+
+```text
+OPENTAPE --native-position64 --device NRMT0
+OPENTAPE --native-locate64 4294967296 --device NRMT0
+OPENTAPE --native-locate64 18446744073709551615 --partition 2 --device NRMT0
+```
+
+`ot_native_position64` / `ot_dos_native_position64` read the 32-byte long
+READ POSITION response (service action `06h`). `ot_native_locate64` /
+`ot_dos_native_locate64` submit synchronous LOCATE(16), opcode `92h`.
+Each has an explicit format-1 64-byte packet on the established function 4/5;
+format 0 and its old packet layouts are unchanged. Capabilities `00100000h`
+and `00200000h` advertise these wide operations. The complete current provider
+mask, including PARTITIONS, is `1FFFFFFFh`. Wide support is
+checked independently; no automatic short-form fallback or truncation occurs.
+
+Coordinates use explicit low/high DWORDs throughout the portable SDK and DOS
+binding. Shared decimal conversion supports `0..18446744073709551615` using
+16-bit limbs and 32-bit intermediates, without floating point or `long long`.
+Overflow and malformed operands are rejected before device I/O. Explicit
+partition selection still accepts 0..255; current-partition mode remains
+separate. A long observation can report a wider partition field without making
+it a representable LOCATE partition selector.
+
+Long-form LONU and MPU independently qualify the block/partition and logical
+filemark-number groups. Unknown fields are zeroed without claiming a valid
+zero. Verified block position may succeed with unknown filemark number; no
+verified block returns SDK PARTIAL/CLI 2. A legacy manager without residual
+proof exposes no coordinates. Existing uncertainty, native writer ownership,
+legacy EOF and saved diagnostics follow the same observation/movement rules
+as the short bindings. A failed LOCATE(16) latches native FAILED and is never
+replayed; observation cannot clear it. Autosense follows the actual six-, ten-
+or sixteen-byte CDB rather than a fixed offset.
+
+Host/ABI/SDK and `dos-native-wide-smoke` tests exercise full-width readback,
+independent validity, decimal limits, unknown short-form overflow, large
+partitions, legacy/malformed lengths, moved cursor after failure, exclusive
+ownership and explicit recovery in both languages. See [testing](testing.md)
+and OpenASPI's `docs/native-tape-wide.md`. Hardware and Windows qualification,
+64-bit archive bookmarks and verified emulation remain pending.
+
+The [DOS native control screen](native-controls-ui.md) now consumes these
+operations through the same SDK: T opens the subview, P reads position and G
+edits a full-width target with explicit confirmation. Load/unload, removal
+locks and rewind share the established ownership and failure rules.
+
+## Reported partition layout
+
+`OPENTAPE --native-partitions [--device NRMT0]` uses
+`ot_native_partitions` / `ot_dos_native_partitions` and function 6. It prints
+raw maximum/defined additional counts, flags, format recognition, packed
+units and size descriptor count only after validating the complete response.
+The result may describe a pending configuration or previous medium: it is
+not a list of proven LOCATE targets, capacity or LTFS support. Native failure
+state and legacy EOF/diagnostics are preserved. Unproven transfer lengths
+return PARTIAL with no layout. No readiness probe, retry, mode change or
+formatting is implicit. Older headers reject the command without device I/O.
+See OpenASPI `docs/native-tape-partitions.md` for the exact wire contract.
+
+The DOS tape-controls **S** view now exposes signed record/filemark SPACE and
+EOD through the same adapter. `ot_native_space_count_parse` supplies the shared
+CLI/UI decimal parser; malformed input preserves its output. Unit choice,
+editing and canceled confirmation perform no I/O. See
+[relative positioning in the DOS controls](native-controls-ui.md#relative-positioning).
+
+## Extended mark spacing
+
+The native SDK and CLI expose `--native-space-seq-filemarks N`,
+`--native-space-setmarks N` and `--native-space-seq-setmarks N`. Each uses
+signed decimal -8388608..8388607 and optional `--device NRMT0`. CONTROL enums
+14/15/16 map to SPACE codes 2/4/5, respectively. The individual provider bits
+are `00800000h`, `01000000h` and `02000000h`; the complete current provider
+mask is `1FFFFFFFh`. The 64-byte packet, version and count offset are unchanged.
+
+Consecutive spacing seeks N adjacent matching marks, rather than counting N
+separate runs. Setmarks remain distinct from filemarks. All operations use the
+current partition and issue one synchronous CDB. They neither write marks nor
+automatically change setmark-reporting mode. Device/mode support is qualified
+separately; unsupported commands fail with retained uncertainty and no replay.
+This does not change archive framing. Classified setmark reads now have
+the separate boundary contract below.
+
+`OT_NATIVE_TAPE_EXTENDED_SPACE` identifies matching provider headers.
+`ot_native_space_operation` classifies supported SPACE enums without including
+media/removal enums 10..13. Older SDK builds reject CLI verbs and chooser
+entries 4/5/6 without opening a device or substituting READY.
+
+## Classified setmark reads
+
+Matching provider headers expose `OT_TAPE_STREAM_SETMARK=40h` and provider
+capability `OT_TAPE_OP_READ_SETMARK=04000000h`. Current target mark sense with
+ASC/ASCQ `00/03` is a setmark rather than an ordinary filemark. A current
+SDK reader returns its validated STREAM event and actual bytes, including
+data-plus-mark replies. Hard, deferred, host or malformed responses remain
+errors; absent count proof does not become an empty-record success.
+
+The shared validator rejects older providers' FILEMARK+`00/03` packets and
+blocks that reader session. Older SDKs reject the new unknown flag without
+reading again. OTB1 archive readers reject a classified setmark as a boundary
+error in both variable and fixed modes, without accepting data, queuing EOF
+or performing another read. Verification cannot complete on this mark.
+The existing archive format and legacy compatibility API are otherwise retained;
+explicit setmark writing now uses the owned writer operation below; device
+mode changes remain separate work. See OpenASPI
+`docs/native-tape-setmarks.md` for the precise protocol and provenance rules.
+
+## Explicit setmark writing
+
+`OT_NATIVE_TAPE_WRITE_SETMARK` enables `ot_native_writer_setmark` and
+`ot_dos_native_writer_setmark` with matching provider headers. CONTROL operation
+17 writes one setmark with WSMK=1 and IMMED=0. It requires an active writer and
+zero packet count/flags/block-size fields even for a fixed-block claim. It is
+not accepted by the one-shot `ot_native_execute` or SPACE entry points.
+
+The independent provider bit is `OT_TAPE_OP_SETMARK=08000000h`. Writer open
+captures the snapshot operation mask; a missing bit rejects this optional
+request without a command or failure latch, leaving ordinary writing available.
+A submitted setmark marks the session dirty before I/O, retains ownership on
+success, and retains dirty/failed ownership on error. Further operations do not
+retry it. Abort/unfinished close release ownership without marks/flushes and
+preserve failure through cleanup; explicit rewind supplies later recovery.
+
+Ordinary OTB1 finalization continues to use its required filemark and does not
+insert setmarks automatically. An older-header build keeps ordinary writer
+behavior. The provider's `docs/native-tape-setmark-write.md` documents wire
+fields, completion states and memory-only qualification.
+
+## Explicit TapeAlert retrieval
+
+`ot_native_alerts` / `ot_dos_native_alerts` require the explicit
+`OT_TAPE_ALERTS_ACKNOWLEDGE` flag. Reading page 2Eh can acknowledge device
+warning flags; the SDK never polls/retries it as part of ordinary status.
+The provider capability is `OT_TAPE_OP_ALERTS=10000000h`; DOS function 7 uses
+a separate 64-byte packet. Reported and active masks contain flags 1..64
+through separate low/high DWORDs. Active is a subset of reported; an absent
+reported bit is unknown, not clear. State helper results are -1/0/1.
+
+`OPENTAPE --native-alerts --allow-clear [--device NRMT0]` prints and flushes
+the notice before submission. It rejects missing/duplicate acknowledgment and
+refresh/extra arguments without opening. Exit 0 means complete retrieval,
+including a report with active flags; it is not a drive-health verdict.
+No warning severity or recovery policy is invented from numeric codes.
+
+The driver stages masks until the complete page passes bounds/parameter checks.
+Unverified legacy transfer lengths return PARTIAL with no flag states. Errors
+preserve legacy diagnostics, queued EOF and native uncertainty. A first read
+may already have cleared warnings even if its reply cannot be used, so no
+second request is made automatically. Old headers reject the CLI/UI action
+without substituting READY. See OpenASPI `docs/native-tape-alerts.md` for the
+wire contract and primary device references.

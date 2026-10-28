@@ -82,6 +82,15 @@ int main(void)
     }
     strcpy(m.path, "LIMIT.BIN"); assert(ot_plan_add(&plan, "SOURCE", &m) == OT_PLAN_LIMIT);
     ot_plan_free(&plan);
+    strcpy(m.path, "DATA/FILE"); assert(ot_plan_add(&plan, "SOURCE", &m) == 0);
+    strcpy(m.path, "data/file/CHILD"); assert(ot_plan_add(&plan, "SOURCE", &m) == OT_PLAN_DUPLICATE);
+    strcpy(m.path, "DATA/FILE2"); assert(ot_plan_add(&plan, "SOURCE", &m) == 0);
+    ot_plan_free(&plan);
+    strcpy(m.path, "DATA/DIR/CHILD"); assert(ot_plan_add(&plan, "SOURCE", &m) == 0);
+    strcpy(m.path, "data/dir"); assert(ot_plan_add(&plan, "SOURCE", &m) == OT_PLAN_DUPLICATE);
+    m.kind = OT_FILE_DIRECTORY; m.dos_attributes = 0x10u;
+    assert(ot_plan_add(&plan, "SOURCE", &m) == 0);
+    ot_plan_free(&plan);
     puts("OpenTape backup-plan tests passed");
     return 0;
 }

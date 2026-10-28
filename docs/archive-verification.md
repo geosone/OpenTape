@@ -87,3 +87,9 @@ complete backup/restore workflow remains pending. Initial
 available. Passing checks cannot
 establish that the source selection was complete, that an external
 catalogue is correct, or that an actual restore will succeed.
+
+## DOS live progress
+
+Confirmed V/L actions now use [read-only block observations](verification-progress.md)
+for live counts and full paths. Metadata stays provisional through filemark and
+checked close. Ordinary CLI wrappers retain their existing output and read flow.

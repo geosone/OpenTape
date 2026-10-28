@@ -1,9 +1,9 @@
 #include <string.h>
 #include "opentape/verify_stream.h"
 
-int ot_verify_stream_visit(struct ot_tape_reader *r, struct ot_archive_verify *v,
+int ot_verify_stream_observed(struct ot_tape_reader *r, struct ot_archive_verify *v,
                        oa_u8 *buffer, unsigned capacity, oa_u32 limit,
-                       ot_metadata_visitor visitor, void *context)
+                       ot_metadata_visitor visitor, void *context, ot_verify_observer observer, void *observer_context)
 {
     unsigned bytes, i;
     oa_u16 offset;
@@ -11,7 +11,7 @@ int ot_verify_stream_visit(struct ot_tape_reader *r, struct ot_archive_verify *v
     struct ot_file_metadata metadata;
     oa_u32 reads = 0ul;
     int rc;
-    if (r == 0 || !r->opened || v == 0 || buffer == 0 || capacity < 2u ||
+    if (r == 0 || !r->opened || r->observing || v == 0 || buffer == 0 || capacity < 2u ||
         (oa_u32)capacity > 65535ul) return OT_READ_BAD_ARGUMENT;
     if ((r->status.tape.device_parameters & OA_MT_PARAM_FIXED_BLOCK) != 0u)
         return OT_READ_BAD_MODE;
@@ -35,9 +35,21 @@ int ot_verify_stream_visit(struct ot_tape_reader *r, struct ot_archive_verify *v
                 offset = (oa_u16)(offset + (oa_u16)record.data_size);
             }
         }
+        if (observer != 0) {
+            r->observing = 1u;
+            observer(observer_context, v, buffer, bytes);
+            r->observing = 0u;
+        }
         /* The verifier rejects block-counter overflow before it can wrap. */
         ++reads;
     }
+}
+
+int ot_verify_stream_visit(struct ot_tape_reader *r, struct ot_archive_verify *v,
+                           oa_u8 *buffer, unsigned capacity, oa_u32 limit,
+                           ot_metadata_visitor visitor, void *context)
+{
+    return ot_verify_stream_observed(r, v, buffer, capacity, limit, visitor, context, 0, 0);
 }
 
 int ot_verify_stream(struct ot_tape_reader *r, struct ot_archive_verify *v,
@@ -46,9 +58,9 @@ int ot_verify_stream(struct ot_tape_reader *r, struct ot_archive_verify *v,
     return ot_verify_stream_visit(r, v, buffer, capacity, limit, 0, 0);
 }
 
-int ot_verify_session(const struct ot_reader_ops *ops, const char *name,
+int ot_verify_session_observed(const struct ot_reader_ops *ops, const char *name,
                       oa_u8 *buffer, unsigned capacity, ot_metadata_visitor visitor,
-                      void *context, struct ot_verify_session_result *result)
+                      void *context, ot_verify_observer observer, void *observer_context, struct ot_verify_session_result *result)
 {
     int rc;
     if (result == 0) return OT_READ_BAD_ARGUMENT;
@@ -58,19 +70,19 @@ int ot_verify_session(const struct ot_reader_ops *ops, const char *name,
         !ot_probe_raw_name_valid(name)) return OT_READ_BAD_ARGUMENT;
     rc = ot_reader_open(&result->reader, ops, name);
     if (rc != 0) return rc;
-    return ot_verify_session_opened(buffer, capacity, visitor, context, result);
+    return ot_verify_session_opened_observed(buffer, capacity, visitor, context, observer, observer_context, result);
 }
 
-int ot_verify_session_opened(oa_u8 *buffer, unsigned capacity, ot_metadata_visitor visitor,
-                              void *context, struct ot_verify_session_result *result)
+int ot_verify_session_opened_observed(oa_u8 *buffer, unsigned capacity, ot_metadata_visitor visitor,
+                              void *context, ot_verify_observer observer, void *observer_context, struct ot_verify_session_result *result)
 {
     unsigned first_error;
     int rc, close_rc;
-    if (result == 0 || !result->reader.opened || buffer == 0 || capacity < 2u ||
+    if (result == 0 || !result->reader.opened || result->reader.observing || buffer == 0 || capacity < 2u ||
         (oa_u32)capacity > 65535UL) return OT_READ_BAD_ARGUMENT;
     memset(&result->verify, 0, sizeof(result->verify));
-    rc = ot_verify_stream_visit(&result->reader, &result->verify, buffer,
-                                 capacity, 0ul, visitor, context);
+    rc = ot_verify_stream_observed(&result->reader, &result->verify, buffer,
+                                 capacity, 0ul, visitor, context, observer, observer_context);
     /* A fixed-framing backend latches malformed OTB1/padding to prevent
      * further reads, but that is archive corruption, not a failed SCSI command.
      * Preserve the parser's result code while still closing the poisoned reader. */
@@ -84,4 +96,16 @@ int ot_verify_session_opened(oa_u8 *buffer, unsigned capacity, ot_metadata_visit
         rc = close_rc;
     } else if (rc != 0) result->reader.dos_error = first_error;
     return rc;
+}
+
+int ot_verify_session(const struct ot_reader_ops *ops, const char *name,
+                      oa_u8 *buffer, unsigned capacity, ot_metadata_visitor visitor,
+                      void *context, struct ot_verify_session_result *result)
+{
+    return ot_verify_session_observed(ops, name, buffer, capacity, visitor, context, 0, 0, result);
+}
+int ot_verify_session_opened(oa_u8 *buffer, unsigned capacity, ot_metadata_visitor visitor,
+                             void *context, struct ot_verify_session_result *result)
+{
+    return ot_verify_session_opened_observed(buffer, capacity, visitor, context, 0, 0, result);
 }

@@ -18,6 +18,14 @@ archive data still undergoes all CRC/session checks.
 Add [`--dry-run`](restore-preview.md) to verify the same policy and preview
 file actions without creating or changing anything in the destination.
 
+## DOS catalogue interface
+
+The DOS UI can [restore marked regular files into a new destination](catalog-restore.md)
+using `--ui --restore-to C:\RECOVER` and W. It uses this same verifier,
+staging/readback and publication path. Without replacement grants the root must be new. O now separately selects
+exact marked files for replacement; existing-root and publication rules follow
+the policy below.
+
 ## Per-file replacement selection
 
 ```text
@@ -38,8 +46,8 @@ Their archive data still undergoes every CRC/size/session check; skipping cannot
 hide corrupt input. Output reports replacements and unchanged files separately.
 A selection absent from the archive fails at the filemark, rather than silently
 succeeding; other files may already have been restored. Selecting a directory
-does not authorize replacing its children. Selection is currently CLI-only,
-not yet a graphical per-file dialog.
+does not authorize replacing its children. The GUI's separate O grants have the
+same per-file scope and are consumed by each confirmed W batch.
 
 Archive paths are confined below the destination root. Only the existing relative DOS
 8.3 component policy is accepted: no drive prefixes, absolute paths, `..`,

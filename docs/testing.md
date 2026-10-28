@@ -615,3 +615,655 @@ must not produce successful media completion. Exact counters check that no
 implicit filemarks/flushes or retries occur. Normal and legacy residual variants
 exercise the SDK and CLI; invalid arguments never submit a CDB, and ordinary
 files are preserved. Both language builds are supported. No host tape is used.
+
+## Native cartridge removal qualification
+
+```sh
+make OPENASPI=../OpenAspi dos-native-lock-smoke
+MAXLANG=GR OUT="$PWD/build/native-lock-gr" bash tests/dos_native_lock.sh normal lock-unsupported unlock-target
+```
+
+The installed provider/SDK and CLI use a memory-only PREVENT/ALLOW manager.
+Normal and legacy residual variants check exact six-byte CDBs, no data buffer,
+32-bit capability negotiation, busy ownership, rejected request preservation,
+active/abandoned clean and dirty writer sessions, unchanged native state on
+failed non-moving commands, prevented UNLOAD and explicit recovery. The `eof`
+variant queues a legacy partial-record filemark, performs LOCK/UNLOCK and then
+consumes the pending zero-byte EOF without another READ. It prevents removal
+controls from silently changing stream state. Host/unsupported/deferred/
+contradictory/target/BUSY/FILEMARK errors remain failures; exact counters reject
+hidden retries, marks and flushes. Both CLI languages are supported. Old SDK
+headers still build, with the new verbs rejected before device access. No host
+tape is attached; physical behavior remains unqualified.
+
+## Logical tape position qualification
+
+```sh
+make OPENASPI=../OpenAspi dos-native-position-smoke
+MAXLANG=GR OUT="$PWD/build/native-position-gr" bash tests/dos_native_position.sh normal unknown legacy eof unsupported
+```
+
+Disposable DOS images use the production provider and memory-only
+`mockposition.inc` manager. Tests check exact ten-byte READ POSITION CDBs,
+full-width big-endian coordinates, BOP/EOP, BPU/LOLU and position overflow,
+short/reserved/missing or oversized residual reports, legacy unverified length,
+qualified host/unsupported/deferred/contradictory/target/BUSY/FILEMARK errors,
+multiple handles and request preservation. Native FAILED/DIRTY|FAILED survives
+observation; active writers remain BUSY. Legacy diagnostics and queued EOF
+remain unchanged. Exact counters prohibit hidden readiness/movement/retry/
+filemark/flush operations. SDK tests cover guarded packets, capability and
+ownership checks, close failures and old-header builds. Both language builds
+are covered; no host tape is attached.
+
+## Explicit logical LOCATE qualification
+
+```sh
+make OPENASPI=../OpenAspi dos-native-locate-smoke
+MAXLANG=GR OUT="$PWD/build/native-locate-gr" bash tests/dos_native_locate.sh normal legacy eof unsupported descriptor
+```
+
+A memory-only cursor/partition model independently reports each LOCATE target
+through READ POSITION. Current-partition commands must not silently select
+partition zero; explicit selection includes partitions 0 and 255. Object
+addresses cover 0, WORD boundaries, signed LONG boundaries and `4294967295`.
+Tests enforce clean-state ownership, exact target echoes, invalid-request
+preservation, missing capability, active and abandoned writers, full CLI range
+parsing and rejection before I/O. The `eof` fixture proves that successful
+movement clears a queued legacy filemark without pretending it is preserved.
+
+Faults include host, unsupported fixed/descriptor sense, deferred, contradictory,
+target BUSY, hard target and FILEMARK. A failed movement deliberately changes
+the mock cursor; observation may report it but must preserve FAILED. LOCATE,
+SPACE and data sessions remain blocked until explicit successful rewind.
+Exact counters prohibit retries, hidden position/readiness probes, marks,
+flushes and software fallback. Legacy managers can complete LOCATE while their
+position readback remains explicitly unverified. Both languages and old SDK
+header builds are qualified; physical devices are not attached.
+
+## Wide logical position qualification
+
+```sh
+make OPENASPI=../OpenAspi dos-native-wide-smoke
+MAXLANG=GR OUT="$PWD/build/native-wide-gr" bash tests/dos_native_wide.sh normal legacy lonu mpu eof descriptor
+```
+
+The memory-only cursor model shares low/high position state between LOCATE(10)
+and LOCATE(16); independent long READ POSITION reads it back. Tests cover WORD,
+DWORD and unsigned 64-bit limits, decimal output, upper-word echo mismatch,
+current/explicit partition, full-width reported partition, short-form overflow
+without truncation, independent LONU/MPU, obsolete response bytes, short/missing/
+oversized residuals and legacy unverified lengths. Rejected operands submit
+no command; exact counters detect hidden probes, retry, marks or fallback.
+
+Both six-/ten-/sixteen-byte autosense offsets are checked against fixed and
+descriptor errors. Failed wide moves deliberately alter the cursor and retain
+FAILED; observation and READY cannot recover native sessions. Active and
+abandoned writers, dirty state, old EOF, explicit rewind and packet guards are
+covered. Host helpers round-trip decimal values through
+`18446744073709551615` and preserve outputs on overflow or short buffers.
+Both language builds and old SDK-header builds are qualified. No physical tape
+is attached; real devices and Windows bindings remain unqualified.
+
+## Native DOS control screen
+
+```sh
+make OPENASPI=../OpenAspi dos-native-controls-smoke
+MAXLANG=GR OUT="$PWD/build/native-controls-gr" bash tests/dos_native_controls.sh normal unknown legacy unsupported
+NATIVE_UI_SDK="$PWD/deps/OpenASPI" OUT="$PWD/build/native-controls-old" bash tests/dos_native_controls.sh old-sdk
+```
+
+The first command uses real QUILIB drawing/input in disposable DOS images.
+QEMU monitor events enter/cancel dialogs, correct decimal and partition errors,
+exercise full 64-bit targets and operate the memory-only tape model. VGA dumps
+check complete localized values, diagnostic/state warnings and inherited
+QLIB data/highlight/help attributes. Exact command counters prohibit hidden
+position/readiness probes, movement, retries, marks and flushes.
+
+The old-SDK case requires a checkout without the optional wide/removal header
+extensions. It proves unavailable UI keys report the requirement without an
+open or fallback command. Normal tests additionally reject an ordinary file
+masquerading as a tape alias and a missing alias, while preserving file contents.
+See [native controls UI](native-controls-ui.md) for behavior and ownership rules.
+
+## Reported partition layout
+
+`bash tests/dos_native_partitions.sh` runs the installed provider, SDK and CLI
+against memory-only MODE SENSE page 11h responses. Each disposable DOS image
+checks exact command counts, no implicit probes/retries, active writers,
+retained FAILED/DIRTY state, legacy diagnostic preservation and queued EOF.
+Fixtures include PS, pending counts above reported maximum, absent size
+descriptors, reserved/odd/truncated/duplicate/missing/subpage/trailing-page
+errors, bad residual provenance and host/target/deferred/unsupported failures.
+The CLI rejects extra/duplicate/refresh arguments, rewind aliases and ordinary
+files. Both languages use the same behavior. No host tape is attached.
+
+The native controls normal workflow presses **I**, verifies raw metadata and
+the pending-layout warning, then continues the existing positioning workflow.
+Layout-specific UI fixtures additionally verify that legacy lengths, malformed
+pages and host errors display diagnostics without stale metadata. Old SDK
+builds reject **I** without commands. The protocol's host validation
+and 16-bit ABI checks also cover the 64-byte partition packet.
+
+## Relative SPACE in DOS controls
+
+Run `make OPENASPI=../OpenAspi dos-native-space-ui-smoke` for the **S** chooser,
+signed record/filemark editor and EOD confirmation. `MAXLANG=GR` selects German.
+Individual cases use `bash tests/dos_native_controls.sh space-normal` and
+`space-legacy`, `space-host`, `space-unsupported`, `space-deferred`,
+`space-contradict`, `space-mark`. An older-header build can use
+`NATIVE_UI_SDK=$PWD/deps/OpenASPI OUT=$PWD/build/space-ui-old` with `space-normal`.
+
+The real QEMU keyboard/VGA tests compare exact no-data six-byte SPACE CDBs
+against an independent fixture sequence. They exercise positive and negative
+24-bit limits, both units and EOD, empty/sign/overflow/invalid/sticky input,
+backspace, canceled editors/confirmation and fixed alias selection. Fault
+cases preserve FAILED after position observation, reject movement without a
+CDB and recover only after explicit rewind. Ordinary-file and missing-device
+rejections submit no commands; requested file contents stay unchanged.
+The count and help text inherit existing QUILIB colors. Host tests cover the
+shared decimal parser, output preservation and arbitrarily long invalid input.
+No host tape is attached.
+
+## Extended mark spacing
+
+`bash tests/dos_native_extended_space.sh` runs all three additional native SPACE
+operations with each signed extreme, positive/negative/zero counts, raw invalid
+packets, competing handles, active writers and abandoned FAILED/DIRTY sessions.
+The CLI uses the same independent CDB sequence after counter reset and rejects
+missing, overflowing, duplicate-device and refresh arguments without commands.
+Per-operation fault profiles cover host/unsupported/deferred/contradictory,
+filemark and descriptor-sense errors, retained state and explicit recovery.
+`MAXLANG=GR` repeats the localized contract. The fixture remains memory-only.
+
+`bash tests/dos_native_controls.sh space-ext-normal` drives actual VGA/keyboard
+selection of modes 4/5/6. Fault variants are listed in the controls guide.
+Old SDK checks reject all new verbs and menu entries with zero submissions;
+basic SPACE remains available. No new native mark writer or read-side
+setmark-to-EOF mapping is implied.
+
+## Native setmark reads
+
+`bash tests/dos_native_setmark.sh` runs 35 memory-only installed DOS scenarios:
+variable/fixed blocks, fixed/descriptor sense, zero/partial data, legacy ASPI
+residual support, missing/conflicting length evidence and transport/target
+errors. Setmarks remain separate from FILEMARK, repeated accepted raw reads
+submit repeated CDBs, and an archive reader fails before accepting bytes.
+Exact command counters prohibit hidden reads, retries, marks and writes.
+`MAXLANG=GR` selects a German build. Older-header qualification uses
+`SETMARK_SDK=$PWD/deps/OpenASPI OUT=$PWD/build/setmark-old` and the `normal`,
+`descriptor`, `fixed`, `fixed-descriptor` cases; each rejects the new result
+and submits only its first read.
+
+The actual archive CLI harness supports `setmark`, `combined-setmark`,
+`fixed-setmark` and `fixed-combined-setmark`. It creates a valid archive in
+its memory-only medium, substitutes a setmark at the terminal boundary and
+requires verification to fail. Host SDK tests also reject old provider
+FILEMARK+00/03 responses; archive tests cover terminal marks with and without
+combined final data. No physical tape is attached.
+
+## Owned SETMARK writes
+
+`bash tests/dos_native_setwrite.sh` runs 26 memory-only installed DOS variants:
+fixed/variable writer claims, legacy residual reporting, unfinished close,
+explicit abort and nine target/transport failure profiles for each mode.
+The independent CDB fixture requires `10 02 00 00 01 00`, no data buffer and
+32 sense bytes. Exact counters distinguish setmark attempts, ordinary filemarks,
+zero-mark flushes and data writes. Raw invalid requests and unowned/competing
+handles submit no command. A missing cached provider bit leaves the SDK claim
+and diagnostic unchanged. Failed marks cannot replay through any writer method;
+cleanup preserves the first error and explicit rewind permits a new session.
+
+`MAXLANG=GR` selects German. Older-header builds use
+`SETWRITE_SDK=$PWD/deps/OpenASPI OUT=$PWD/build/setwrite-old` with `normal fixed`;
+these retain ordinary writer finish/close with one flush and no setmark.
+Host tests separately cover malformed/overrun/mismatched replies and platform
+errors, including cleanup precedence. No physical drive is attached.
+
+## TapeAlert
+
+`bash tests/dos_native_alerts.sh` runs the installed provider/SDK/CLI in
+memory-only QEMU DOS images. It covers sparse/all/clear/empty flag sets,
+1/32/33/64 boundaries, future parameters, DS, malformed headers/ordering/lengths/
+values, negotiated residuals and legacy managers, transport/target/descriptor
+failures, retained FAILED/DIRTY state and legacy EOF/diagnostic preservation.
+The CLI rejects missing/duplicate acknowledgment and extra/refresh arguments.
+Exact CDB counters prohibit an implicit header probe, repeated read or status
+poll. `MAXLANG=GR` selects German.
+
+`bash tests/dos_native_controls.sh alerts-normal alerts-all alerts-clear
+alerts-empty alerts-legacy alerts-malformed alerts-host` exercises the actual
+QUILIB view, required confirmation, cancellation, complete 64-code display,
+unknown/clear states and failure diagnostics. `MAXLANG=GR` covers translation.
+Old SDK controls/CLI checks submit zero commands for A/--native-alerts, while
+the established controls and QUILIB colors retain regression coverage.
+No physical tape is attached.
+
+## DOS catalogue restore preview
+
+On 2026-10-24 the memory-only archive QEMU fixtures passed in English and German:
+`ui`, `ui-legacy`, `fixed-ui`, `ui-preview-keep`, `ui-preview-invalid`,
+`ui-preview-disabled`, `preview-service`, `ui-preview-rewind-fault` and
+`ui-preview-read-fault`. The real QUILIB screen confirms cancellation/empty marks,
+read-only completion, retained marks and provisional counts after failure.
+Exact ASPI totals prove invalid destinations/cancellation submit no tape command,
+a failed rewind is followed by no read and a read error causes no retry.
+
+The quiet service fixture checks invalid arguments/duplicates, missing destination
+parents, a file used as root, stale selection paths and successful new-file
+preview. Its entire writable boot image must remain byte-identical. The UI
+existing-file fixture checks original bytes, and all missing-root cases check
+that preview never creates the target. CLI native archive roundtrips remain a
+separate regression. See [preview behavior and API](restore-preview.md).
+
+## DOS catalogue restore into a new root
+
+On 2026-10-24 all 11 `ui-restore*` fixtures plus `restore-service` passed in both
+English and German (24 writable-restore scenarios). These cover actual native,
+legacy and 512-byte fixed-block output, one selected file from a two-file tree,
+empty/disabled/consumed-cancel flows, rejection of existing and file targets,
+failed rewind, hard read failure and corruption after a fully checked file was
+already published. Successful extraction is checked byte-for-byte. Unmarked tree
+files must be absent; repeated W refuses the existing root without new tape I/O.
+Cancellation, disabled action, preflight refusal and failed rewind must leave the
+entire writable DOS floppy image byte-identical. Exact mock ASPI totals detect
+extra movement, reads and retries. The service tests also check invalid/duplicate
+filters, malformed/duplicate/missing/overlong startup options, missing parents,
+unmatched selected paths with a retained empty root, checked readback counters
+and successful publication. These fixtures never access a host tape device.
+
+The complete English preview regression set, German normal/existing-file preview,
+quiet preview service and CLI native archive roundtrip/replacement tests also
+passed after introducing the shared result and writable batch. English/German
+`make check`, the older pinned OpenASPI SDK build and Markdown link audits passed.
+See [GUI restore policy and partial-failure handling](catalog-restore.md).
+
+## GUI per-file replacement grants
+
+On 2026-10-24 all ten `ui-replace*` fixtures and `replace-service` passed in both
+English and German (22 replacement scenarios). These exercise the real DOS
+screen with native, legacy and 512-byte fixed-block transport; KEEP preview
+without grants and replacement preview with grants; read-only originals; a
+mixed two-file extraction with only one replacement grant; unmarked-file O,
+deselection, A/N behavior, cancellation, disabled W and consumed permissions.
+A repeated W without renewed grants refuses the existing root without tape I/O.
+
+Confirmed rewind failure, hard read error, late archive corruption after a
+published replacement and leftover `OT$OLD.TMP` are also covered. Exact ASPI
+counts detect retries or unexpected movement. Original/kept/unrelated files and
+published replacements are checked byte-for-byte. The entire writable DOS floppy
+must stay byte-identical for cancellation, disabled W, failed rewind, first-read
+failure and staging-preflight refusal. A late archive error retains a successful
+per-file replacement counter but never reports overall success.
+
+`replace-service` runs STRMTEST's catalogue tests under DOS and verifies API
+replacement/filter subset checks, duplicate and empty-list policy, DOS case
+folding, planned replacement counts and actual existing/new-root results with
+readback counters. Host tests include 256 grants, independent snapshot ownership,
+ambiguity rollback and sticky error handling; ASan/UBSan and leak checking pass.
+English/German `make check`, the pinned older OpenASPI SDK build, existing
+preview/new-root GUI flows and CLI archive roundtrip/replacement regressions pass.
+See [O grants and their lifetime](catalog-restore.md#per-file-replacement-with-o).
+
+## DOS catalogue content comparison
+
+On 2026-10-24 all 15 `ui-compare*` fixtures plus `compare-service` passed in both
+English and German (32 comparison scenarios). The real QUILIB screen covers
+native, legacy and 512-byte fixed-block transport; a filtered two-file tree;
+matching content with different attributes; same-length CRC differences; shortened
+and missing files; missing/file roots; leftover recovery files; empty selection;
+disabled K; consumed confirmation cancellation and result keys; failed rewind,
+hard read failure and late archive corruption after a successful file check.
+Every scenario requires the entire writable DOS floppy image to remain
+byte-identical. O grants remain present throughout, proving comparison never
+consumes replacement intent or opens a writable restore batch.
+
+The tree case compares one selected file while an unselected disk file differs;
+only the archive data of the exclusion is verified. File mismatches show the
+checked path and explicit content/length reason. Late archive failure retains a
+provisional checked-file count without a success result. Exact ASPI totals
+confirm preflight/cancel paths issue no tape commands, failed rewind is followed
+by no read and faults are not automatically retried.
+
+`compare-service` verifies invalid/null/duplicate filters, invalid aliases and
+roots before I/O, missing selected archive paths, successful size/CRC/EOF checks
+and zero writable/replacement result flags. Malformed, duplicate, missing and
+overlong `--compare-to` startup arguments are also rejected before access.
+English/German `make check`, the pinned older OpenASPI SDK build, preview/restore/
+replacement GUI regressions and CLI archive roundtrip/replacement tests pass.
+See [comparison policy and result semantics](archive-compare.md#dos-catalogue-comparison).
+
+## DOS catalogue selection import
+
+On 2026-10-24 all 13 `ui-import*` fixtures and `import-service` passed in both
+English and German (28 import scenarios). The real QUILIB screen covers native,
+legacy and 512-byte fixed-block catalogues; successful case-insensitive import;
+unknown names after an earlier valid name; malformed/NUL, duplicate, empty,
+directory, missing and oversized inputs; consumed confirmation cancellation;
+disabled I; unchanged inspection cursor and successful clearing of O grants.
+All import-only cases require the entire writable DOS floppy image to remain
+byte-identical and the exact ASPI total to stay unchanged by import.
+
+`ui-import-restore` imports NOTE from a two-file archive after INPUT had been
+marked with replacement intent. The old mark/grant is removed, the new mark has
+no replacement permission, and an independently confirmed W restores only NOTE.
+Host checks compare its bytes and require INPUT to remain absent from output.
+
+`import-service` runs the catalogue tests under DOS, checks actual regular-file
+list loading, all-or-nothing failure, directory/unknown/version ambiguity and
+character-device input refusal without a SCSI submission. The core tests cover
+all 256 entries, mutable input lifetime, case folding, sticky catalogue errors,
+late name-resolution failure and directory/file ambiguity in both entry orders.
+Host ASan/UBSan with leak checking and English/German `make check` pass, as do
+the pinned older OpenASPI SDK build, preview/restore/replacement/comparison GUI
+regressions and CLI single-file/tree/replacement roundtrips. Source recheck and
+checked-close behavior reuse the already tested shared selection loader.
+See [input format, atomicity and permission rules](catalog-selection-import.md).
+
+## DOS backup dialog and quiet backup service
+
+On 2026-10-24 all 15 `ui-backup*` fixtures and `backup-service` passed in both
+English and German (32 backup scenarios). The real QUILIB dialog exercises
+single-file/tree sources, native/legacy/fixed-block output, consumed cancellation
+and result keys, fresh confirmation for a second attempt, disabled B, missing
+sources, a file supplied as a tree and a regular file used as the tape alias.
+Short-write and flush/filemark/finish faults retain errors without retries.
+The maximum 16 nested levels below the source root (17 directory entries) pass
+through the GUI call chain and independent comparison with the existing 9 KB
+DOS stack. A seventeenth nested level fails planning before any tape command.
+
+Every successful GUI/API write is independently rewound and compared against
+prepared existing disk files with the CLI. The dialog itself reports readback
+pending and performs no automatic rewind or comparison. Exact ASPI totals prove
+that cancellation/preflight failures write nothing and detect altered write or
+finalization sequences. The separate legacy fixture models two close filemarks
+and SPACE -1; native explicit finish retains its own single-mark sequence.
+
+All cases require the complete writable DOS floppy image to stay byte-identical:
+only the resident virtual tape receives data, and comparison reads existing files.
+`backup-service` checks invalid/unauthorized requests, rejection of authorization
+values other than 1, non-sticky authorization after success, complete structured
+file/byte/error counters and no console output between API markers.
+English/German `make check`, the older pinned SDK build, native-controls renderer/
+color checks, existing catalogue operations and CLI file/tree/replacement
+roundtrips pass. The OpenASPI build/check also passes with the test-only legacy
+fixture extension. No physical tape device is accessed.
+See [configuration, write consent and completion limits](dos-backup-ui.md).
+
+## QUILIB mouse action integration
+
+On 2026-10-24 `ui-mouse`, `ui-backup-mouse` and `ui-import-mouse` passed in
+English and German (six real PS/2 scenarios). These load CuteMouse into disposable
+DOS images and send real QEMU movement/button packets. They cover menu/alias
+selection, row/checkbox marks, O/A/N and navigation, modal and blank-area clicks,
+drag-out cancellation, preview, native SPACE/LOCATE editing/cancellation,
+one-batch backup consent and independently verified tape output, then import and
+selective restore of an actual disk file. Exact ASPI totals detect unintended
+operations; read-only/tape-output flows keep the full DOS disk image identical.
+Restore output is compared byte-for-byte and the excluded file must be absent.
+
+The mapper's host/DOS tests and host ASan/UBSan pass, as do English/German
+`make check`, the older pinned SDK build, native-controls keyboard/color checks,
+existing keyboard catalogue/backup/restore/replace/compare/import flows and CLI
+file/tree/replacement roundtrips. No host tape device is accessed.
+See [mouse controls, gesture boundaries and test setup](dos-mouse.md).
+
+
+## Interactive DOS backup settings
+
+On 2026-10-24 the five form scenarios passed in English and German:
+`ui-backup-form`, `ui-backup-form-cancel`, `ui-backup-form-invalid`,
+`ui-backup-form-limit-mouse` and `ui-backup-form-tree-mouse`. The real QUILIB
+FLDEDIT path covers empty defaults, CLI presets, saved/cancelled drafts,
+validation, keyboard navigation and real PS/2 mouse focus/mode/save/cancel.
+The field-limit scenario rejects an extra overwrite character at EOF in all
+three fields, clamps a blank-tail click, checks Delete/Backspace there and
+requires an exact resulting volume string. Settings-only and invalid/cancelled
+runs issue zero ASPI commands. Successful file/tree backups issue 19/27 commands
+including independent CLI rewind/readback comparison. Every form case leaves
+its entire DOS disk image byte-identical. No physical tape is accessed.
+
+`FORMTEST.EXE` also runs the portable form transaction tests in DOS; the host
+version passes ASan/UBSan. Tests check ownership, borrowed request strings,
+40/31-character limits, missing terminators and rejection without changing
+committed state. `make check` passes for US/GR and the DOS frontend builds
+against the older pinned OpenASPI SDK. See [configuration and test commands](dos-backup-ui.md).
+
+
+## Interactive DOS catalogue paths
+
+On 2026-10-24 all six path-setting fixtures passed in English and German:
+`ui-paths-cancel`, `ui-paths-disable`, `ui-preview-paths`, `ui-compare-paths`,
+`ui-restore-paths` and `ui-import-paths-mouse`. They configure destinations and
+list filenames through P, then exercise the actual services with no matching
+startup options. Saved presets, rejected/cancelled drafts, empty-field disabling,
+retained selection/replacement intent and P during a pending confirmation are
+checked in the real QUILIB screen. The mouse fixture configures all five fields,
+imports a selection and restores only that file; output bytes are compared and
+the unmarked file must remain absent. Preview exports an exact CRLF path list.
+Comparison and settings-only/cancel/disable scenarios require the complete DOS
+disk image to remain unchanged. Exact ASPI totals stay 10/28/37/53 as appropriate;
+settings changes themselves issue no commands.
+
+`PATHTEST.EXE` runs the portable bounded transaction tests under DOS; host tests
+also pass ASan/UBSan. `make check` passes for US/GR and the DOS executable builds
+against the older pinned SDK. Regression fixtures recheck maximum-depth backup,
+backup settings (including mouse/overwrite limits), import, replacement restore
+and CLI roundtrip after both editors began sharing `fields_dos_ui.c`.
+See [path editor and reproduction commands](catalog-paths-ui.md).
+
+
+## Offline DOS catalogue search
+
+On 2026-10-24 `ui-search` and `ui-search-mouse` passed in English and German.
+The real QUILIB dialog covers mixed-case literal queries, forward/backward
+navigation, wraparound, directory hits, one-hit cycles, path-offset reset,
+missing-hit cursor retention, Apply/Cancel, empty-query clearing and the shared
+40-character overwrite-at-EOF guard. Opening search at a pending preview
+confirmation only cancels that confirmation; another S opens search. Every
+screen retains the marked file and its exact replacement intent.
+
+All four runs require the unchanged pre-search total of 40 ASPI commands and
+byte-identical whole DOS floppy images. `FINDTEST.EXE` runs the portable tests
+under DOS, including 256 entries, repeated paths, long path tails, OEM bytes,
+invalid inputs, inconsistent lists and unchanged result on failure. Host tests
+pass ASan/UBSan, `make check` passes for US/GR and the DOS executable builds
+against the older pinned SDK. See [search behavior and test commands](catalog-search.md).
+
+
+## DOS catalogue directory selection
+
+On 2026-10-24 `ui-directory`, `ui-directory-mouse`, `ui-restore-directory`
+and `ui-restore-directory-mouse` passed in English and German. Keyboard and
+real PS/2 input toggle one file or a complete directory, complete a partially
+selected tree without adding replacement grants, clear its existing grants and
+report an empty directory. Enter at a pending preview/result only dismisses it;
+it cannot also toggle the group. Selection-only runs retain byte-identical DOS
+disk images and exactly 43 ASPI commands. Confirmed restoration publishes and
+independently reads back both selected files, compares their bytes, leaves no
+staging/recovery files and refuses an existing root on a second attempt, for
+an exact total of 53 ASPI commands. All media are memory-only fixtures.
+
+`CSELTEST.EXE` covers boundary/session isolation, untouched outside grants,
+atomic rejection, empty trees and all 256 entries. Its nodes and snapshot copies
+are allocated individually to respect DOS's 64-KiB pointer/block limits.
+`FINDTEST.EXE` now uses individual allocations too; both maximum-size tests
+were rerun successfully under DOS in US/GR without truncation warnings. Host
+models pass ASan/UBSan, `make check` passes in both languages, and the frontend
+builds with the older pinned SDK. See [directory selection and reproduction](catalog-directory-selection.md).
+
+
+## DOS settings profiles
+
+On 2026-10-24 all seven profile scenarios passed in English and German:
+`ui-profile`, `ui-profile-mouse`, `ui-profile-missing`, `ui-profile-corrupt`,
+`ui-profile-staging`, `ui-profile-empty` and `ui-profile-device`. Settings are
+entered through F/P instead of exceeding the DOS command-tail limit. The real
+QUILIB controls exercise discarded filenames, cancelled reviews, consumed result
+keys, new-file export with staged readback, existing-target refusal and atomic
+import after changing both settings groups. Empty import disables backup and
+all five path actions; failed import preserves the complete previous settings.
+
+Python independently constructs the expected 337-byte little-endian/CRC encoding;
+exports match it exactly in both languages and leave no staging file. Failure
+and read-only scenarios retain whole-disk byte identity. The tape-alias case
+places a shadow `RMT0.CFG` file on FAT and verifies that the editor refuses it
+before any open/close can rewind tape. Every profile case requires zero ASPI
+commands, and loading a profile still leaves B awaiting its normal one-shot
+write confirmation.
+
+`SETTEST.EXE` and host tests cover single-byte damage at every wire offset,
+CRC-valid invalid fields/version/padding, disabled settings, exact field bounds,
+reserved profile filenames and unchanged output on error. Host ASan/UBSan,
+US/GR `make check`, the older pinned SDK build and backup/restore/mouse/CLI
+regressions pass. See [profile operation and wire format](settings-profiles.md).
+
+
+## Read-only backup preflight
+
+On 2026-10-24 the eight F7 scenarios passed in English and German:
+`ui-preflight-file`, `ui-preflight-tree-mouse`, `ui-preflight-missing`,
+`ui-preflight-alias`, `ui-preflight-tree-alias`, `ui-preflight-depth`,
+`ui-preflight-limit` and `ui-preflight-disabled`. They check exact counts/bytes,
+empty-directory inclusion, no partial totals after errors, source-device shadow
+files, depth 16 acceptance, depth 17 refusal and result-key consumption. All
+sixteen cases retain byte-identical DOS disk images and zero ASPI commands.
+A later B still requires its separate write confirmation.
+
+`PSUMTEST.EXE`/host tests exercise list/metadata validation, atomic output,
+256 entries and exact payload carries beyond 4 GiB. The shared source backend
+now rejects tape stems before opening, including DOS colon/space spellings and
+canonicalized dot/parent paths. The quiet backup-service test directly checks
+`RMT0.CFG` and `RMT0\.` refusal, then confirms its unchanged 19-command
+backup/readback total and lack of persistent authorization. Profiles reuse the
+same pure stem detector.
+
+The extra source canonicalizer exposed the previous GUI stack margin at maximum
+backup depth. The DOS application now reserves 12,000 bytes; real maximum-depth
+backup and preflight pass in both languages with this bound. US/GR `make check`,
+host ASan/UBSan, older pinned SDK builds and profile/import/restore/replacement/
+CLI regressions qualify the shared backend change. See [F7 behavior and limits](backup-preflight.md).
+
+
+## Live backup progress
+
+On 2026-10-24 `ui-backup-progress`, `ui-backup-progress-tree-mouse` and
+`ui-backup-progress-flush` passed in English and German. Conditional latency in
+the memory-only ASPI fixture exposes real VGA states: 32712/35000 file bytes
+with zero completed files, full payload before FILE_END acceptance, provisional
+finalization and either successful completion or a forced flush failure. Tree
+output completes both files; success is independently rewound/compared. Exact
+ASPI totals remain 19/27/8 and whole DOS disk images remain byte-identical.
+The latency code is absent unless `ARCHIVE_PROGRESS_PAUSE` is defined.
+
+Host/`PRGTEST.EXE` tests check record-commit notifications, no advance on short
+writes, rejected reentry/late registration, empty files, 64-bit payload carry,
+reinitialization and finalization failure. Both updated DOS model tests and
+live file scenarios were rerun in US/GR. The quiet backup-service case observes
+exact event counts and rejects notification before/after unauthorized calls;
+its 19-command write/readback roundtrip remains unchanged. Host ASan/UBSan,
+US/GR `make check` and the older pinned SDK build pass. Regressions include
+maximum-depth, tree, legacy/fixed output, short/finalization errors, preflight,
+profiles, directory restore and CLI roundtrip.
+See [progress counters and observation API](backup-progress.md).
+
+
+## Read-side restore/preview/comparison progress
+
+On 2026-10-24 `ui-restore-progress`, `ui-restore-progress-mouse`,
+`ui-preview-progress`, `ui-compare-progress`, `ui-restore-progress-tree` and
+`ui-restore-progress-late` passed in English and German. Test-only read latency
+starts after catalogue loading. Real VGA captures show 32712/35000 bytes before
+file commit, full payload before successful file completion, excluded-file
+verification and pending filemark/tape close. The late-failure fixture publishes
+and reads back one file, then rejects a corrupt session boundary without showing
+success. Final file bytes match; excluded output remains absent. Read-only
+preview/comparison retain whole-disk identity and O intent. ASPI counts stay
+37, 53 (tree) and 36 (late failure).
+
+`RESTEST.EXE`/host tests observe successful blocks through existing fault cases,
+reject reentry/free/late registration and preserve cumulative checked bytes
+across sessions. A packed block with successful data writes but failed commit
+produces no progress callback or checked-byte advance; cleanup still aborts its
+staging. Quiet DOS service tests reject invalid observed modes/replacement
+permissions before I/O/notification and verify exact successful callback counts.
+Updated byte counters and file/tree/late-error screens were rerun in US/GR.
+Host ASan/UBSan, both `make check` builds and the older pinned SDK build pass;
+regressions cover quiet services, replacement, native fixed/legacy reading,
+import, maximum-depth backup and CLI roundtrip. No physical tape is used.
+See [counter semantics and observation API](restore-progress.md).
+
+## Offline catalogue files
+
+The [catalogue codec and DOS UI](catalog-files.md) are covered by
+`test_catalog_file`, DOS `CATTEST.EXE` and:
+
+```sh
+make OPENASPI=../OpenAspi MAXLANG=US dos-catalog-files-smoke
+make OPENASPI=../OpenAspi MAXLANG=GR dos-catalog-files-smoke
+```
+
+The keyboard and PS/2 roundtrips preserve live marks on export, refuse an
+existing destination, load offline with cleared annotations and block C/W/K/O.
+Corrupt, missing, staging and tape-alias cases preserve the previous live view
+and full floppy image. Every case checks an exact CDB total, and the saved
+metadata is decoded independently by `tests/check_catalog_file.py`.
+
+The `ui-catfile-offline` and `ui-catfile-large` variants additionally require
+zero CDBs for the entire run. `CATIO.EXE` in the latter verifies production DOS
+streaming output/readback and import beyond 64 KiB; Python validates every
+exported long path independently.
+
+## Catalogue batch commands
+
+See [CLI syntax, isolation and publication tests](catalog-cli.md#verification).
+`test_catalog_cli` injects failures around stdout and live/regular-file service
+boundaries, including late verifier failure and the final post-publication
+message. The QEMU matrix covers complete production CLI parsing and file I/O:
+
+```sh
+make OPENASPI=../OpenAspi MAXLANG=US dos-catalog-cli-smoke
+make OPENASPI=../OpenAspi MAXLANG=GR dos-catalog-cli-smoke
+```
+
+Ten cases per language check native, legacy, fixed-block, offline/empty,
+malformed options/files, existing target/staging refusal before tape access,
+CRC failure without export, over-64-KiB listing and direct offline UI startup.
+Offline, invalid-argument and protected-output cases compare whole floppy
+images and require zero CDBs; the corrupt-tape case instead checks its exact
+12-command failure boundary and absence of any published catalogue.
+
+## Multiple-source backup sets
+
+See [format, limits and qualification](backup-sets.md#verification).
+`test_backup_set` checks streaming manifest transactions, and `BSETTEST.EXE`
+runs the same parser boundary/failure cases under DOS. The QEMU matrix uses:
+
+```sh
+make OPENASPI=../OpenAspi MAXLANG=US dos-backup-set-smoke
+make OPENASPI=../OpenAspi MAXLANG=GR dos-backup-set-smoke
+```
+
+Cases cover native/legacy/fixed write and independent tape comparison,
+invalid/duplicate/prefix/alias/canonical-alias inputs, combined entry overflow,
+Set UI keyboard/mouse selection, combined F7 counts, v2 profile readback/import,
+confirmed writes, progress and the 16/17-level tree boundary. Invalid/limit
+cases require zero CDBs and unchanged complete floppy images. New public-service
+tests also reject unconfirmed Set requests and missing manifests before output.
+
+## Verification and catalogue progress
+
+See [observer ownership, fault coverage and VGA checks](verification-progress.md).
+The existing streaming test now observes all 22 session lifecycle cases and
+checks read/close/stream reentry rejection. `test_verify_progress` and DOS
+`VPRTEST.EXE` cover packed records, multiple sessions, carry and atomic errors.
+
+```sh
+make OPENASPI=../OpenAspi MAXLANG=US dos-verification-progress-smoke
+make OPENASPI=../OpenAspi MAXLANG=GR dos-verification-progress-smoke
+```
+
+Six cases per language verify V/L progress with keyboard/mouse, native/legacy/
+fixed framing, tree payload and a late corrupt session boundary. The entire
+floppy image must remain unchanged and exact CDB totals must match the ordinary
+read sequences. Read pauses start at rewind 1 in these isolated fixtures;
+existing restore-progress fixtures retain their rewind-3 default.

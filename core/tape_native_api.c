@@ -65,6 +65,17 @@ int ot_native_probe(const struct ot_native_ops *ops, const char *name, oa_u16 fl
     return close_opened(ops, rc, error);
 }
 
+/* Keep SPACE classification explicit across old provider headers. Media and
+ * removal enums occupy the gap and must never acquire SPACE count semantics. */
+int ot_native_space_operation(oa_u16 operation)
+{
+    return (operation>=OT_TAPE_CONTROL_SPACE_RECORDS && operation<=OT_TAPE_CONTROL_SPACE_EOD)
+#ifdef OT_NATIVE_TAPE_EXTENDED_SPACE
+        || (operation>=OT_TAPE_CONTROL_SPACE_SEQ_FILEMARKS && operation<=OT_TAPE_CONTROL_SPACE_SEQ_SETMARKS)
+#endif
+        ;
+}
+
 static int execute(const struct ot_native_control_ops *ops, const char *name,
                       oa_u16 operation, oa_s32 count, struct ot_tape_control_v1 *result, unsigned *error)
 {
@@ -77,10 +88,16 @@ static int execute(const struct ot_native_control_ops *ops, const char *name,
     if (error != 0) *error = 0u;
     if (result != 0) memset(result, 0, sizeof(*result));
     if (ops == 0 || ops->control == 0 || result == 0 || error == 0 ||
+#ifdef OT_NATIVE_TAPE_EXTENDED_SPACE
+        operation > OT_TAPE_CONTROL_SPACE_SEQ_SETMARKS ||
+#elif defined(OT_NATIVE_TAPE_REMOVAL)
+        operation > OT_TAPE_CONTROL_UNLOCK ||
+#else
         operation > OT_TAPE_CONTROL_UNLOAD ||
+#endif
         (operation > OT_TAPE_CONTROL_REWIND && operation < OT_TAPE_CONTROL_SPACE_RECORDS) ||
         !ops_valid(&ops->query, name)) return OT_NATIVE_ARGUMENT;
-    if (operation >= OT_TAPE_CONTROL_SPACE_RECORDS && operation <= OT_TAPE_CONTROL_SPACE_EOD &&
+    if (ot_native_space_operation(operation) &&
         ot_tape_space_init(p, operation, count) != 0)
         return OT_NATIVE_ARGUMENT;
     *error = ops->query.open_readonly(ops->query.context, name);
@@ -93,18 +110,27 @@ static int execute(const struct ot_native_control_ops *ops, const char *name,
     else if (operation == OT_TAPE_CONTROL_SPACE_EOD) required = OT_TAPE_OP_SPACE_EOD;
     else if (operation == OT_TAPE_CONTROL_LOAD) required = OT_TAPE_OP_LOAD;
     else if (operation == OT_TAPE_CONTROL_UNLOAD) required = OT_TAPE_OP_UNLOAD;
+#ifdef OT_NATIVE_TAPE_REMOVAL
+    else if (operation == OT_TAPE_CONTROL_LOCK) required = OT_TAPE_OP_LOCK;
+    else if (operation == OT_TAPE_CONTROL_UNLOCK) required = OT_TAPE_OP_UNLOCK;
+#endif
+#ifdef OT_NATIVE_TAPE_EXTENDED_SPACE
+    if(operation==OT_TAPE_CONTROL_SPACE_SEQ_FILEMARKS) required=OT_TAPE_OP_SPACE_SEQ_FILEMARKS;
+    else if(operation==OT_TAPE_CONTROL_SPACE_SETMARKS) required=OT_TAPE_OP_SPACE_SETMARKS;
+    else if(operation==OT_TAPE_CONTROL_SPACE_SEQ_SETMARKS) required=OT_TAPE_OP_SPACE_SEQ_SETMARKS;
+#endif
     blocked = OT_TAPE_SESSION_WRITTEN | OT_TAPE_SESSION_BUFFERED | OT_TAPE_SESSION_WRITE_ERROR |
         OT_TAPE_SESSION_NATIVE_WRITER;
     if (operation == OT_TAPE_CONTROL_REWIND) blocked |= OT_TAPE_SESSION_REWINDING;
     if (operation >= OT_TAPE_CONTROL_LOAD) blocked |= OT_TAPE_SESSION_REWINDING;
-    if (operation >= OT_TAPE_CONTROL_SPACE_RECORDS && operation <= OT_TAPE_CONTROL_SPACE_EOD)
+    if (ot_native_space_operation(operation))
         blocked |= OT_TAPE_SESSION_REWINDING |
         OT_TAPE_SESSION_NATIVE_DIRTY | OT_TAPE_SESSION_NATIVE_FAILED;
     if (rc == OT_NATIVE_OK && (info.operations & required) == 0UL) rc = OT_NATIVE_UNSUPPORTED;
     if (rc == OT_NATIVE_OK && (info.session_state & blocked) != 0u) rc = OT_NATIVE_BUSY;
     if (rc == OT_NATIVE_OK) {
         memset(&buffer, 0xa5, sizeof(buffer));
-        if (operation >= OT_TAPE_CONTROL_SPACE_RECORDS && operation <= OT_TAPE_CONTROL_SPACE_EOD)
+        if (ot_native_space_operation(operation))
             ot_tape_space_init(p, operation, count);
         else ot_tape_control_init(p, operation);
         *error = ops->control(ops->query.context, p);
@@ -125,14 +151,18 @@ int ot_native_execute(const struct ot_native_control_ops *ops, const char *name,
                       oa_u16 operation, struct ot_tape_control_v1 *result, unsigned *error)
 {
     return execute(ops, name, (operation <= OT_TAPE_CONTROL_REWIND ||
-                   operation == OT_TAPE_CONTROL_LOAD || operation == OT_TAPE_CONTROL_UNLOAD) ? operation : 0xffffu,
+#ifdef OT_NATIVE_TAPE_REMOVAL
+                   (operation >= OT_TAPE_CONTROL_LOAD && operation <= OT_TAPE_CONTROL_UNLOCK)
+#else
+                   (operation >= OT_TAPE_CONTROL_LOAD && operation <= OT_TAPE_CONTROL_UNLOAD)
+#endif
+                   ) ? operation : 0xffffu,
                    0, result, error);
 }
 int ot_native_space(const struct ot_native_control_ops *ops, const char *name,
                     oa_u16 operation, oa_s32 count, struct ot_tape_control_v1 *result, unsigned *error)
 {
-    return execute(ops, name, (operation >= OT_TAPE_CONTROL_SPACE_RECORDS &&
-                   operation <= OT_TAPE_CONTROL_SPACE_EOD) ? operation : 0xffffu,
+    return execute(ops, name, ot_native_space_operation(operation) ? operation : 0xffffu,
                    count, result, error);
 }
 
@@ -263,7 +293,10 @@ static int writer_open(struct ot_native_writer *w,
     if (rc == OT_NATIVE_OK) rc = query_opened(&ops->control.query, 0u, &info, &w->platform_error);
     if (rc == OT_NATIVE_OK && (info.operations & required) != required) rc = OT_NATIVE_UNSUPPORTED;
     if (rc == OT_NATIVE_OK && info.session_state != 0u) rc = OT_NATIVE_BUSY;
-    if (rc == OT_NATIVE_OK) rc = writer_control(w, OT_TAPE_CONTROL_BEGIN_WRITE);
+    if (rc == OT_NATIVE_OK) {
+        w->operations=info.operations;
+        rc = writer_control(w, OT_TAPE_CONTROL_BEGIN_WRITE);
+    }
     if (rc != OT_NATIVE_OK) return close_opened(&ops->control.query, rc, &w->platform_error);
     w->opened = w->claimed = 1u;
     return OT_NATIVE_OK;
@@ -312,6 +345,10 @@ static int writer_operation(struct ot_native_writer *w, oa_u16 operation)
     int rc;
     if (w == 0 || !w->opened || !w->claimed) return OT_NATIVE_ARGUMENT;
     if (w->failure != 0 && operation != OT_TAPE_CONTROL_ABORT_WRITE) return w->failure;
+#ifdef OT_NATIVE_TAPE_WRITE_SETMARK
+    if(operation==OT_TAPE_CONTROL_SETMARK && !(w->operations & OT_TAPE_OP_SETMARK))
+        return OT_NATIVE_UNSUPPORTED; /* No command, failure latch or changed diagnostics. */
+#endif
     rc = writer_control(w, operation);
     if (rc == OT_NATIVE_OK && (operation == OT_TAPE_CONTROL_END_WRITE || operation == OT_TAPE_CONTROL_ABORT_WRITE)) {
         w->claimed = 0u;
@@ -323,6 +360,10 @@ int ot_native_writer_flush(struct ot_native_writer *w)
 { return writer_operation(w, OT_TAPE_CONTROL_FLUSH); }
 int ot_native_writer_filemark(struct ot_native_writer *w)
 { return writer_operation(w, OT_TAPE_CONTROL_FILEMARK); }
+#ifdef OT_NATIVE_TAPE_WRITE_SETMARK
+int ot_native_writer_setmark(struct ot_native_writer *w)
+{ return writer_operation(w, OT_TAPE_CONTROL_SETMARK); }
+#endif
 int ot_native_writer_finish(struct ot_native_writer *w)
 { return writer_operation(w, OT_TAPE_CONTROL_END_WRITE); }
 int ot_native_writer_abort(struct ot_native_writer *w)
@@ -346,3 +387,243 @@ int ot_native_writer_close(struct ot_native_writer *w)
     }
     return rc;
 }
+
+#ifdef OT_NATIVE_TAPE_POSITION
+/* Observation has a distinct packet/callback: never route it through a moving
+ * control or treat a reported address as recovery of abandoned native output. */
+int ot_native_position(const struct ot_native_position_ops *ops, const char *name,
+                       struct ot_tape_position_v1 *result, unsigned *error)
+{
+    struct { unsigned char before[8]; struct ot_tape_position_v1 packet; unsigned char after[8]; } buffer;
+    struct ot_tape_position_v1 *p=&buffer.packet;
+    struct ot_tape_info_v1 info;
+    int rc;
+    if(error!=0) *error=0;
+    if(result!=0) memset(result,0,sizeof(*result));
+    if(ops==0 || ops->position==0 || result==0 || error==0 || !ops_valid(&ops->query,name))
+        return OT_NATIVE_ARGUMENT;
+    *error=ops->query.open_readonly(ops->query.context,name);
+    if(*error!=0) return OT_NATIVE_OPEN;
+    rc=verify_opened(&ops->query,error);
+    if(rc==0) rc=query_opened(&ops->query,0,&info,error);
+    if(rc==0 && (info.operations & OT_TAPE_OP_POSITION)==0UL) rc=OT_NATIVE_UNSUPPORTED;
+    if(rc==0 && (info.session_state & 0x1fu)!=0u) rc=OT_NATIVE_BUSY;
+    if(rc==0) {
+        memset(&buffer,0xa5,sizeof(buffer)); ot_tape_position_init(p);
+        *error=ops->position(ops->query.context,p);
+        if(!guards_ok(buffer.before,buffer.after)) rc=OT_NATIVE_RESPONSE;
+        else if(*error!=0) rc=OT_NATIVE_IOCTL;
+        else if(ot_tape_position_validate(p,sizeof(*p))!=0) rc=OT_NATIVE_RESPONSE;
+        else {
+            *result=*p;
+            if(p->result==OT_TAPE_RESULT_BUSY) rc=OT_NATIVE_BUSY;
+            else if(p->result==OT_TAPE_RESULT_ERROR) rc=OT_NATIVE_COMMAND;
+            else if(p->result==OT_TAPE_RESULT_PARTIAL || p->valid_fields==0UL) rc=OT_NATIVE_PARTIAL;
+        }
+    }
+    return close_opened(&ops->query,rc,error);
+}
+#endif
+
+#ifdef OT_NATIVE_TAPE_LOCATE
+/* Match the echoed target as well as the completion packet. A successful
+ * command cannot silently substitute another partition, block or CP policy. */
+int ot_native_locate(const struct ot_native_locate_ops *ops,const char *name,oa_u16 flags,
+                     oa_u32 partition,oa_u32 block,struct ot_tape_locate_v1 *result,unsigned *error)
+{
+    struct { unsigned char before[8]; struct ot_tape_locate_v1 packet; unsigned char after[8]; } buffer;
+    struct ot_tape_locate_v1 *p=&buffer.packet;
+    struct ot_tape_info_v1 info;
+    int rc;
+    if(error!=0) *error=0;
+    if(result!=0) memset(result,0,sizeof(*result));
+    if(ops==0 || ops->locate==0 || result==0 || error==0 || !ops_valid(&ops->query,name) ||
+       ot_tape_locate_init(p,flags,partition,block)!=0) return OT_NATIVE_ARGUMENT;
+    *error=ops->query.open_readonly(ops->query.context,name);
+    if(*error!=0) return OT_NATIVE_OPEN;
+    rc=verify_opened(&ops->query,error);
+    if(rc==0) rc=query_opened(&ops->query,0,&info,error);
+    if(rc==0 && (info.operations & OT_TAPE_OP_LOCATE)==0UL) rc=OT_NATIVE_UNSUPPORTED;
+    if(rc==0 && info.session_state!=0u) rc=OT_NATIVE_BUSY;
+    if(rc==0) {
+        memset(&buffer,0xa5,sizeof(buffer)); ot_tape_locate_init(p,flags,partition,block);
+        *error=ops->locate(ops->query.context,p);
+        if(!guards_ok(buffer.before,buffer.after)) rc=OT_NATIVE_RESPONSE;
+        else if(*error!=0) rc=OT_NATIVE_IOCTL;
+        else if(ot_tape_locate_validate(p,sizeof(*p))!=0 || p->flags!=flags ||
+                p->partition!=partition || p->block!=block) rc=OT_NATIVE_RESPONSE;
+        else {
+            *result=*p;
+            if(p->result==OT_TAPE_RESULT_BUSY) rc=OT_NATIVE_BUSY;
+            else if(p->result==OT_TAPE_RESULT_ERROR) rc=OT_NATIVE_COMMAND;
+        }
+    }
+    return close_opened(&ops->query,rc,error);
+}
+#endif
+
+#ifdef OT_NATIVE_TAPE_WIDE
+/* Wide coordinates keep explicit low/high DWORDs through callback and echo
+ * checks; no truncation or implicit short-form fallback is allowed. */
+int ot_native_position64(const struct ot_native_position64_ops *ops, const char *name,
+                       struct ot_tape_position64_v1 *result, unsigned *error)
+{
+    struct { unsigned char before[8]; struct ot_tape_position64_v1 packet; unsigned char after[8]; } buffer;
+    struct ot_tape_position64_v1 *p=&buffer.packet;
+    struct ot_tape_info_v1 info;
+    int rc;
+    if(error!=0) *error=0;
+    if(result!=0) memset(result,0,sizeof(*result));
+    if(ops==0 || ops->position==0 || result==0 || error==0 || !ops_valid(&ops->query,name))
+        return OT_NATIVE_ARGUMENT;
+    *error=ops->query.open_readonly(ops->query.context,name);
+    if(*error!=0) return OT_NATIVE_OPEN;
+    rc=verify_opened(&ops->query,error);
+    if(rc==0) rc=query_opened(&ops->query,0,&info,error);
+    if(rc==0 && (info.operations & OT_TAPE_OP_POSITION64)==0UL) rc=OT_NATIVE_UNSUPPORTED;
+    if(rc==0 && (info.session_state & 0x1fu)!=0u) rc=OT_NATIVE_BUSY;
+    if(rc==0) {
+        memset(&buffer,0xa5,sizeof(buffer)); ot_tape_position64_init(p);
+        *error=ops->position(ops->query.context,p);
+        if(!guards_ok(buffer.before,buffer.after)) rc=OT_NATIVE_RESPONSE;
+        else if(*error!=0) rc=OT_NATIVE_IOCTL;
+        else if(ot_tape_position64_validate(p,sizeof(*p))!=0) rc=OT_NATIVE_RESPONSE;
+        else {
+            *result=*p;
+            if(p->result==OT_TAPE_RESULT_BUSY) rc=OT_NATIVE_BUSY;
+            else if(p->result==OT_TAPE_RESULT_ERROR) rc=OT_NATIVE_COMMAND;
+            else if(p->result==OT_TAPE_RESULT_PARTIAL || (p->valid_fields & 1UL)==0UL) rc=OT_NATIVE_PARTIAL;
+        }
+    }
+    return close_opened(&ops->query,rc,error);
+}
+int ot_native_locate64(const struct ot_native_locate64_ops *ops,const char *name,oa_u16 flags,
+                     oa_u32 partition,oa_u32 block,oa_u32 block_high,struct ot_tape_locate64_v1 *result,unsigned *error)
+{
+    struct { unsigned char before[8]; struct ot_tape_locate64_v1 packet; unsigned char after[8]; } buffer;
+    struct ot_tape_locate64_v1 *p=&buffer.packet;
+    struct ot_tape_info_v1 info;
+    int rc;
+    if(error!=0) *error=0;
+    if(result!=0) memset(result,0,sizeof(*result));
+    if(ops==0 || ops->locate==0 || result==0 || error==0 || !ops_valid(&ops->query,name) ||
+       ot_tape_locate64_init(p,flags,partition,block,block_high)!=0) return OT_NATIVE_ARGUMENT;
+    *error=ops->query.open_readonly(ops->query.context,name);
+    if(*error!=0) return OT_NATIVE_OPEN;
+    rc=verify_opened(&ops->query,error);
+    if(rc==0) rc=query_opened(&ops->query,0,&info,error);
+    if(rc==0 && (info.operations & OT_TAPE_OP_LOCATE64)==0UL) rc=OT_NATIVE_UNSUPPORTED;
+    if(rc==0 && info.session_state!=0u) rc=OT_NATIVE_BUSY;
+    if(rc==0) {
+        memset(&buffer,0xa5,sizeof(buffer)); ot_tape_locate64_init(p,flags,partition,block,block_high);
+        *error=ops->locate(ops->query.context,p);
+        if(!guards_ok(buffer.before,buffer.after)) rc=OT_NATIVE_RESPONSE;
+        else if(*error!=0) rc=OT_NATIVE_IOCTL;
+        else if(ot_tape_locate64_validate(p,sizeof(*p))!=0 || p->flags!=flags ||
+                p->partition!=partition || p->block!=block || p->block_high!=block_high) rc=OT_NATIVE_RESPONSE;
+        else {
+            *result=*p;
+            if(p->result==OT_TAPE_RESULT_BUSY) rc=OT_NATIVE_BUSY;
+            else if(p->result==OT_TAPE_RESULT_ERROR) rc=OT_NATIVE_COMMAND;
+        }
+    }
+    return close_opened(&ops->query,rc,error);
+}
+#endif
+
+#ifdef OT_NATIVE_TAPE_PARTITIONS
+/* Layout reports have their own checked packet/callback. Pending/stale counts
+ * never authorize movement or recover an abandoned native writer. */
+int ot_native_partitions(const struct ot_native_partitions_ops *ops, const char *name,
+                       struct ot_tape_partitions_v1 *result, unsigned *error)
+{
+    struct { unsigned char before[8]; struct ot_tape_partitions_v1 packet; unsigned char after[8]; } buffer;
+    struct ot_tape_partitions_v1 *p=&buffer.packet;
+    struct ot_tape_info_v1 info;
+    int rc;
+    if(error!=0) *error=0;
+    if(result!=0) memset(result,0,sizeof(*result));
+    if(ops==0 || ops->partitions==0 || result==0 || error==0 || !ops_valid(&ops->query,name))
+        return OT_NATIVE_ARGUMENT;
+    *error=ops->query.open_readonly(ops->query.context,name);
+    if(*error!=0) return OT_NATIVE_OPEN;
+    rc=verify_opened(&ops->query,error);
+    if(rc==0) rc=query_opened(&ops->query,0,&info,error);
+    if(rc==0 && (info.operations & OT_TAPE_OP_PARTITIONS)==0UL) rc=OT_NATIVE_UNSUPPORTED;
+    if(rc==0 && (info.session_state & 0x1fu)!=0u) rc=OT_NATIVE_BUSY;
+    if(rc==0) {
+        memset(&buffer,0xa5,sizeof(buffer)); ot_tape_partitions_init(p);
+        *error=ops->partitions(ops->query.context,p);
+        if(!guards_ok(buffer.before,buffer.after)) rc=OT_NATIVE_RESPONSE;
+        else if(*error!=0) rc=OT_NATIVE_IOCTL;
+        else if(ot_tape_partitions_validate(p,sizeof(*p))!=0) rc=OT_NATIVE_RESPONSE;
+        else {
+            *result=*p;
+            if(p->result==OT_TAPE_RESULT_BUSY) rc=OT_NATIVE_BUSY;
+            else if(p->result==OT_TAPE_RESULT_ERROR) rc=OT_NATIVE_COMMAND;
+            else if(p->result==OT_TAPE_RESULT_PARTIAL || p->valid_fields==0UL) rc=OT_NATIVE_PARTIAL;
+        }
+    }
+    return close_opened(&ops->query,rc,error);
+}
+#endif
+
+/* Decimal parsing is bounded before multiplication; even LONG_MIN-like input
+ * is rejected without signed overflow or opening a device. */
+int ot_native_space_count_parse(const char *s, oa_s32 *out)
+{
+    oa_u32 value = 0UL, maximum;
+    int negative;
+    if(s==0 || out==0) return -1;
+    negative = *s == '-';
+    if (negative) ++s;
+    if (*s == 0) return -1;
+    maximum = negative ? 8388608UL : 8388607UL;
+    while (*s) {
+        unsigned digit;
+        if (*s < '0' || *s > '9') return -1;
+        digit = (unsigned)(*s++ - '0');
+        if (value > (maximum - digit) / 10UL) return -1;
+        value = value * 10UL + digit;
+    }
+    *out = negative ? -(oa_s32)value : (oa_s32)value;
+    return 0;
+}
+
+#ifdef OT_NATIVE_TAPE_ALERTS
+/* Explicit acknowledged log retrieval, without implicit status polling or
+ * retry. Preserve first failure through the single close attempt. */
+int ot_native_alerts(const struct ot_native_alerts_ops *ops, const char *name,oa_u16 flags,
+                       struct ot_tape_alerts_v1 *result, unsigned *error)
+{
+    struct { unsigned char before[8]; struct ot_tape_alerts_v1 packet; unsigned char after[8]; } buffer;
+    struct ot_tape_alerts_v1 *p=&buffer.packet;
+    struct ot_tape_info_v1 info;
+    int rc;
+    if(error!=0) *error=0;
+    if(result!=0) memset(result,0,sizeof(*result));
+    if(ops==0 || ops->alerts==0 || result==0 || error==0 || !ops_valid(&ops->query,name) ||
+       ot_tape_alerts_init(p,flags)!=0)
+        return OT_NATIVE_ARGUMENT;
+    *error=ops->query.open_readonly(ops->query.context,name);
+    if(*error!=0) return OT_NATIVE_OPEN;
+    rc=verify_opened(&ops->query,error);
+    if(rc==0) rc=query_opened(&ops->query,0,&info,error);
+    if(rc==0 && (info.operations & OT_TAPE_OP_ALERTS)==0UL) rc=OT_NATIVE_UNSUPPORTED;
+    if(rc==0 && (info.session_state & 0x1fu)!=0u) rc=OT_NATIVE_BUSY;
+    if(rc==0) {
+        memset(&buffer,0xa5,sizeof(buffer)); ot_tape_alerts_init(p,flags);
+        *error=ops->alerts(ops->query.context,p);
+        if(!guards_ok(buffer.before,buffer.after)) rc=OT_NATIVE_RESPONSE;
+        else if(*error!=0) rc=OT_NATIVE_IOCTL;
+        else if(ot_tape_alerts_validate(p,sizeof(*p))!=0) rc=OT_NATIVE_RESPONSE;
+        else {
+            *result=*p;
+            if(p->result==OT_TAPE_RESULT_BUSY) rc=OT_NATIVE_BUSY;
+            else if(p->result==OT_TAPE_RESULT_ERROR) rc=OT_NATIVE_COMMAND;
+            else if(p->result==OT_TAPE_RESULT_PARTIAL || p->valid_fields==0UL) rc=OT_NATIVE_PARTIAL;
+        }
+    }
+    return close_opened(&ops->query,rc,error);
+}
+#endif

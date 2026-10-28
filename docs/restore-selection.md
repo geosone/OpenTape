@@ -57,8 +57,10 @@ publication, recovery files and failure semantics.
 Extraction filtering uses the separate [`--only`/`--only-list` options](selective-restore.md).
 They share this list syntax but do not grant any replacement permission.
 
-The list loader is reusable by future graphical selection work, but a graphical
-file picker is not implemented here. Do not modify the destination concurrently
+The [DOS catalogue O control](catalog-restore.md#per-file-replacement-with-o)
+now builds a separate replacement subset of marked files. It uses the same
+validation and backend policy, with confirmation and grants consumed per W
+batch. It does not load these CLI list files. Do not modify the destination concurrently
 with restore or use hostile filesystem redirects.
 
 ## Tests

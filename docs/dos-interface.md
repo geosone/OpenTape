@@ -3,6 +3,7 @@
 ```text
 OPENTAPE
 OPENTAPE --ui
+OPENTAPE --ui --catalog-in BACKUP.CAT
 OPENTAPE --ui --device NRST0$
 OPENTAPE --ui --selection-out C:\LISTS\PICKED.LST
 ```
@@ -13,6 +14,10 @@ accepts a validated raw no-rewind alias, including a configured custom letter
 and optional `$`; it normalizes ASCII case. Drive/path names, buffered aliases
 and rewind-on-close names are refused before entering the screen.
 
+An explicit [`--catalog-in FILE.CAT`](catalog-cli.md) starts directly in the
+checked offline catalogue view. It performs no tape query and grants no restore
+or replacement operation. Missing/corrupt input returns to DOS before UI setup.
+
 ## Keys
 
 | Key | Action |
@@ -21,12 +26,18 @@ and rewind-on-close names are refused before entering the screen.
 | 0–3 | Explicitly select that unit number, preserving letter and `$`. |
 | Up/Down | Select previous/next unit, wrapping between 0 and 3. |
 | S or Enter | Query the selected alias's status. |
+| F8 / F9 | [Save an open catalogue / load offline catalogue metadata](catalog-files.md). |
+| F7 | Inspect configured backup source metadata/counts without tape access. |
+| F5 / F6 | Export/import a settings profile after a separate confirmation. |
+| F | Edit backup source/path/volume and file/tree/set mode for this session. |
+| P | Edit catalogue destination and list paths for this session. |
+| B | Review and confirm the configured backup at the current tape position. |
 | R | Ask to rewind the selected alias; does not move tape yet. |
 | V | Ask to verify the archive from the selected alias's current position. |
 | L | Ask to load verified archive contents into a read-only paged view. |
 | Esc | Close the input interface, restore the cursor and return to DOS. |
 
-Other keys and mouse-only events are ignored. Selection itself does not probe
+Unassigned keys and mouse events outside visible targets are ignored. Selection itself does not probe
 hardware. Startup does not enumerate or query anything automatically. Refresh
 does not select a FOUND alias or change the current selection. Both selecting
 an alias and refreshing the list invalidate the separate status panel, avoiding
@@ -92,15 +103,30 @@ encode a previously displayed operation failure. See
 L uses the same confirmation and verified session runner, adding a bounded
 metadata collector. Only successful verification and close open the view.
 Up/Down, PgUp/PgDn and Home/End navigate; Left/Right inspect the complete
-selected path. Space toggles a temporary file mark, A marks all regular files
+selected path. Space/Enter toggles a temporary file mark; Enter on a directory
+toggles [its regular-file descendants](catalog-directory-selection.md). A marks all regular files
 and N clears them; directories cannot be marked. B/Esc return to the device
 screen and discard both list and marks. Marks grant no restore/replacement
-authority and other device keys are ignored inside the view.
+authority by themselves. O separately toggles exact replacement intent for a
+marked regular file, displayed as `[!]`; N or deselection clears it. W confirms
+one batch and consumes those grants. See [replacement controls](catalog-restore.md#per-file-replacement-with-o).
+Other device keys are ignored inside the view.
 With an explicit `--selection-out` target, E confirms export of marked paths
 through the existing protected writer. No target means no export; existing
 files are never overwritten. See [export controls and limits](catalog-selection-export.md).
+With `--selection-in`, I [imports file-selection marks](catalog-selection-import.md)
+through the shared list parser and atomic catalogue resolver; successful import
+clears O grants, while errors preserve the prior marks/grants.
 The initial limit is 256 total entries; any overflow/error discards the whole
 provisional list. See [catalogue bounds, controls and tests](archive-catalog.md).
+
+## Mouse operation
+
+The UI now evaluates QUILIB mouse events through the shared
+[mouse action mapper](dos-mouse.md). With a loaded DOS mouse driver, left-click
+visible help actions, alias/catalogue rows, file checkboxes, navigation controls
+and modal Confirm/Cancel/Next controls. Numeric/text input remains keyboard based.
+Clicks use the existing action handlers and cannot bypass confirmation or grants.
 
 ## Display and safety
 
@@ -117,14 +143,36 @@ detection or an automatically selected working drive. Cached snapshots are not
 live monitoring. Run no competing tape application and retain each subsequent
 operation's own media/transport validation.
 
-Status and enumeration use the existing status-only interfaces. Explicitly
-confirmed rewind is the only media-control request; confirmed verification reads
-tape data and advances position. The screen contains no spacing, unload, write
-or changer action. Only explicitly configured and confirmed E export creates
-a new disk path-list file; it never rewrites configuration or grants
-write/replacement authority. Backup,
-archive file selection, restore/preview/compare dialogs and writable workflows
-remain CLI-only; this is the first usable screen, not a complete backup TUI.
+Status and enumeration use the existing status-only interfaces. Confirmed
+verification reads tape and advances position; R explicitly rewinds. The native
+[T controls](native-controls-ui.md) add separately confirmed positioning and
+load/removal operations. These actions do not write backup data to tape or
+operate a changer.
+
+E export creates a separately configured new path-list file; it carries no
+replacement intent. W performs [confirmed restoration of marked files](catalog-restore.md),
+configured with `--restore-to`, through
+the existing staging/readback core. C offers a [read-only preview](restore-preview.md#marked-files-in-the-dos-interface)
+when `--preview-to` is configured. Both confirmations explicitly request one
+rewind and fresh read. Existing destination files are kept unless the confirmed W
+batch names them through O; only a nonempty replacement list permits an existing
+root. K now [compares selected file contents](archive-compare.md#dos-catalogue-comparison)
+with a separately configured comparison destination, confirmed rewind/read
+and retained O intent. F on the device screen edits session-local source,
+archive path, volume and file/tree/set mode using the shared QUILIB field editor.
+F2 saves and Esc discards the draft without I/O. B on the device screen now opens the [configured file/tree backup dialog](dos-backup-ui.md),
+with one-batch confirmation of writing at the current tape position. Replacement-list
+file input remains CLI-only. Confirmed C/W/K batches now display
+[live read-side progress](restore-progress.md), keeping provisional counts
+separate from their final result. F7 on the device screen offers
+[read-only backup preflight](backup-preflight.md), with source counts but no
+tape access or write grant. F5/F6 on the device screen
+[export/import settings profiles](settings-profiles.md), retaining all normal
+operation confirmations and preserving existing export files. In the catalogue, **S** opens a
+[literal full-path search](catalog-search.md); F3/Shift-F3 finds the next/previous
+entry without tape access or changes to marks/grants. **P** edits preview/restore/comparison destinations
+and selection input/output filenames on the device screen or in the catalogue;
+empty fields disable the matching action. See [catalogue path settings](catalog-paths-ui.md).
 
 Rendering and event handling come directly from Open386MAX's QUILIB:
 `initializeScreenInfo`, `paintBackgroundScreen`, shared windows/colors,
@@ -166,3 +214,16 @@ physical displays, mouse workflows and the full backup TUI remain unqualified.
 The same run now also browses/reloads all 46 verified catalogue entries,
 checks navigation/detail offsets and B/Esc return, rejects rereading without
 rewind, and explicitly rewinds again for the final CLI verification.
+
+Native mode also provides **T**, the [tape-controls subview](native-controls-ui.md),
+for 64-bit position/LOCATE, load/unload, removal locks and explicit rewind.
+It uses the same QUILIB colors and checked SDK as the CLI.
+
+The [Set source mode](backup-sets.md) uses a checked manifest to combine several
+file/directory roots. Select `[Set]` in F, cycle with F4, or pass
+`--ui --backup-set SOURCES.LST --as DATA --volume TEST`. F7 plans the complete
+set; B independently replans and confirms it. F5/F6 use v2 profiles for this mode.
+
+V and L now show [live verification/catalogue progress](verification-progress.md)
+with checked block/file/payload counts and full current paths. Counts remain
+provisional through filemark and tape close; the busy view grants no actions.

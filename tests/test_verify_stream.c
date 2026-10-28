@@ -5,6 +5,7 @@
 #include "opentape/archive_writer.h"
 #include "opentape/archive_catalog.h"
 #include "opentape/restore.h"
+#include "opentape/verify_progress.h"
 struct fixture {
     oa_u8 blocks[80][160];
     unsigned sizes[80], count, position, reads, io_error, status_error, visited, visitor_error;
@@ -99,15 +100,40 @@ static unsigned close_handle(void *p, unsigned h)
     struct fixture *t = p;
     assert(h == 3u); ++t->closes; return t->close_error;
 }
+struct observation {
+    struct ot_verify_session_result *result;
+    struct ot_verify_progress progress;
+    unsigned calls, visiting;
+};
+static void observed(void *context, const struct ot_archive_verify *state, const oa_u8 *block, unsigned size)
+{
+    struct observation *watch = context;
+    struct ot_tape_reader *reader = &watch->result->reader;
+    struct ot_archive_verify before = *state, local;
+    oa_u8 scratch[160];
+    unsigned got = 99u, reads = f.reads, closes = f.closes;
+    assert(reader->opened && reader->observing && !reader->failed);
+    assert(state->framing.blocks == ++watch->calls);
+    if (watch->visiting) assert(f.visited == state->last_object);
+    assert(ot_verify_progress_block(&watch->progress, state, block, size) == 0);
+    assert(ot_reader_read(reader, scratch, sizeof(scratch), &got) == OT_READ_BAD_ARGUMENT && got == 0u);
+    assert(ot_reader_close(reader) == OT_READ_BAD_ARGUMENT && reader->opened);
+    memset(&local, 0, sizeof(local));
+    assert(ot_verify_stream(reader, &local, scratch, sizeof(scratch), 1ul) == OT_READ_BAD_ARGUMENT);
+    assert(ot_verify_session_opened(scratch, sizeof(scratch), 0, 0, watch->result) == OT_READ_BAD_ARGUMENT);
+    assert(f.reads == reads && f.closes == closes && memcmp(state, &before, sizeof(before)) == 0);
+}
 static void session_tests(void)
 {
     struct ot_reader_ops ops;
     struct ot_verify_session_result result;
     oa_u8 buffer[160];
+    struct observation watch;
     unsigned test;
     int rc;
     for (test = 0u; test < 22u; ++test) {
         fixture(); memset(&ops, 0, sizeof(ops));
+        memset(&watch, 0, sizeof(watch)); watch.result = &result; watch.visiting = test != 1u;
         ops.probe.context = &f; ops.probe.open_readonly = open_readonly;
         ops.probe.device_info = device_info; ops.probe.status = status;
         ops.probe.close = close_handle; ops.set_raw = set_raw; ops.read = read_block;
@@ -124,14 +150,19 @@ static void session_tests(void)
         if (test == 12u) f.close_error = 5u;
         if (test == 13u || test == 14u) f.close_error = 6u;
         if (test == 21u) f.count = 0u;
-        rc = ot_verify_session(test == 18u ? 0 : &ops,
+        rc = ot_verify_session_observed(test == 18u ? 0 : &ops,
             test == 15u ? "NRT0$" : test == 20u ? 0 : "NRMT0",
             test == 16u ? 0 : buffer, test == 17u ? 1u : sizeof(buffer),
-            test == 1u ? 0 : visit, &f, test == 19u ? 0 : &result);
+            test == 1u ? 0 : visit, &f, observed, &watch, test == 19u ? 0 : &result);
         if (test >= 15u && test <= 20u) {
             assert(rc == OT_READ_BAD_ARGUMENT && f.opens == 0u && f.closes == 0u && f.reads == 0u);
             continue;
         }
+        assert(!result.reader.observing);
+        assert(watch.calls == (test >= 2u && test <= 6u ? 0u :
+            test == 7u || test == 8u || test == 14u ? 19u :
+            test == 9u || test == 11u || test == 13u ? 20u :
+            test == 10u ? 62u : test == 21u ? 0u : 63u));
         assert(f.opens == 1u && !result.reader.opened);
         assert(f.closes == (test == 2u ? 0u : 1u));
         if (test == 0u || test == 1u) {
@@ -202,6 +233,154 @@ static void catalog_export_tests(void)
         ot_catalog_free(&catalog);
     }
     puts("OpenTape catalogue selection conversion tests passed");
+}
+
+/* Permissions are a separate, owned, DOS-case-insensitive subset snapshot.
+ * Navigation/mark-all must never manufacture replacement rights. */
+static void catalog_replacement_tests(void)
+{
+    struct ot_catalog catalog;
+    struct ot_restore_selection selected, replacement;
+    struct ot_file_metadata metadata;
+    unsigned i;
+    memset(&catalog, 0, sizeof(catalog)); memset(&metadata, 0, sizeof(metadata));
+    memset(&selected, 0, sizeof(selected)); memset(&replacement, 0, sizeof(replacement));
+    ot_catalog_clear_replacements(0);
+    assert(ot_catalog_replace(0, 0u, 1u) == OT_CATALOG_ARGUMENT);
+    assert(ot_catalog_replacements(0, &replacement) == OT_CATALOG_ARGUMENT);
+    assert(ot_catalog_replacements(&catalog, 0) == OT_CATALOG_ARGUMENT);
+    assert(ot_catalog_replacements(&catalog, &replacement) == 0 && replacement.count == 0u);
+    metadata.kind = OT_FILE_DIRECTORY; strcpy(metadata.path, "ROOT");
+    assert(ot_catalog_capture(&catalog, 1ul, 1ul, &metadata) == 0);
+    assert(ot_catalog_replace(&catalog, 0u, 1u) == OT_CATALOG_ARGUMENT);
+    metadata.kind = OT_FILE_REGULAR; strcpy(metadata.path, "ROOT/A.BIN");
+    assert(ot_catalog_capture(&catalog, 1ul, 2ul, &metadata) == 0);
+    strcpy(metadata.path, "ROOT/B.BIN");
+    assert(ot_catalog_capture(&catalog, 1ul, 3ul, &metadata) == 0);
+    assert(ot_catalog_replace(&catalog, 1u, 1u) == OT_CATALOG_ARGUMENT);
+    assert(ot_catalog_mark_all(&catalog, 1u) == 0 && catalog.marked == 2u && catalog.replacements == 0u);
+    assert(ot_catalog_replace(&catalog, 1u, 1u) == 0 && catalog.replacements == 1u);
+    assert(ot_catalog_replace(&catalog, 1u, 1u) == 0 && catalog.replacements == 1u);
+    assert(ot_catalog_replace(&catalog, 3u, 1u) == OT_CATALOG_ARGUMENT);
+    assert(ot_catalog_replace(&catalog, 1u, 2u) == OT_CATALOG_ARGUMENT);
+    assert(ot_catalog_mark_all(&catalog, 1u) == 0 && catalog.replacements == 1u);
+    assert(ot_catalog_selection(&catalog, &selected) == 0 && selected.count == 2u);
+    assert(ot_catalog_replacements(&catalog, &replacement) == 0 && replacement.count == 1u);
+    assert(strcmp(replacement.paths[0], "ROOT/A.BIN") == 0);
+    assert(ot_catalog_replacements(&catalog, &replacement) == OT_CATALOG_ARGUMENT && replacement.count == 1u);
+    assert(ot_catalog_mark(&catalog, 1u, 0u) == 0 && catalog.replacements == 0u);
+    assert(ot_catalog_mark(&catalog, 1u, 1u) == 0 && catalog.replacements == 0u);
+    assert(ot_catalog_replace(&catalog, 2u, 1u) == 0);
+    ot_catalog_clear_replacements(&catalog);
+    assert(catalog.marked == 2u && catalog.replacements == 0u);
+    assert(ot_catalog_replace(&catalog, 2u, 1u) == 0);
+    assert(ot_catalog_mark_all(&catalog, 0u) == 0 && catalog.replacements == 0u && catalog.marked == 0u);
+    ot_catalog_free(&catalog);
+    assert(strcmp(replacement.paths[0], selected.paths[0]) == 0); /* Independent snapshots. */
+    ot_restore_selection_free(&selected); ot_restore_selection_free(&replacement);
+    for (i = 0u; i < OT_CATALOG_MAX_ENTRIES; ++i) {
+        sprintf(metadata.path, "F%03u.BIN", i);
+        assert(ot_catalog_capture(&catalog, 1ul, i + 1ul, &metadata) == 0);
+    }
+    assert(ot_catalog_mark_all(&catalog, 1u) == 0);
+    for (i = 0u; i < OT_CATALOG_MAX_ENTRIES; ++i) assert(ot_catalog_replace(&catalog, i, 1u) == 0);
+    assert(ot_catalog_replacements(&catalog, &replacement) == 0 && replacement.count == 256u);
+    ot_catalog_free(&catalog);
+    assert(strcmp(replacement.paths[255], "F255.BIN") == 0);
+    ot_restore_selection_free(&replacement);
+    /* Roll back an earlier copied path when a later grant is version-ambiguous. */
+    strcpy(metadata.path, "FIRST.BIN"); assert(ot_catalog_capture(&catalog, 1ul, 1ul, &metadata) == 0);
+    strcpy(metadata.path, "LAST.BIN"); assert(ot_catalog_capture(&catalog, 1ul, 2ul, &metadata) == 0);
+    assert(ot_catalog_mark_all(&catalog, 1u) == 0);
+    assert(ot_catalog_replace(&catalog, 0u, 1u) == 0 && ot_catalog_replace(&catalog, 1u, 1u) == 0);
+    strcpy(metadata.path, "last.bin"); assert(ot_catalog_capture(&catalog, 2ul, 1ul, &metadata) == 0);
+    assert(ot_catalog_replacements(&catalog, &replacement) == OT_CATALOG_AMBIGUOUS && replacement.count == 0u);
+    assert(catalog.marked == 2u && catalog.replacements == 2u);
+    catalog.error = OT_CATALOG_LIMIT;
+    assert(ot_catalog_replace(&catalog, 0u, 0u) == OT_CATALOG_ARGUMENT && catalog.replacements == 2u);
+    assert(ot_catalog_replacements(&catalog, &replacement) == OT_CATALOG_ARGUMENT);
+    ot_catalog_clear_replacements(&catalog);
+    assert(catalog.marked == 2u && catalog.replacements == 0u && catalog.error == OT_CATALOG_LIMIT);
+    ot_catalog_free(&catalog);
+    puts("OpenTape catalogue replacement-intent tests passed");
+}
+
+/* Import is an all-or-nothing replacement of annotations, not a replacement
+ * grant or a directory/path expansion. Every failure preserves prior intent. */
+static void catalog_import_tests(void)
+{
+    struct ot_catalog catalog;
+    struct ot_restore_selection list;
+    struct ot_file_metadata metadata;
+    static char selected[OT_CATALOG_MAX_ENTRIES][13];
+    unsigned i;
+    memset(&catalog, 0, sizeof(catalog)); memset(&list, 0, sizeof(list));
+    memset(&metadata, 0, sizeof(metadata));
+    assert(ot_catalog_apply_selection(0, &list) == OT_CATALOG_ARGUMENT);
+    assert(ot_catalog_apply_selection(&catalog, 0) == OT_CATALOG_ARGUMENT);
+    assert(ot_catalog_apply_selection(&catalog, &list) == OT_CATALOG_ARGUMENT);
+    metadata.kind = OT_FILE_DIRECTORY; strcpy(metadata.path, "ROOT");
+    assert(ot_catalog_capture(&catalog, 1ul, 1ul, &metadata) == 0);
+    metadata.kind = OT_FILE_REGULAR; strcpy(metadata.path, "ROOT/A.BIN");
+    assert(ot_catalog_capture(&catalog, 1ul, 2ul, &metadata) == 0);
+    strcpy(metadata.path, "ROOT/B.BIN");
+    assert(ot_catalog_capture(&catalog, 1ul, 3ul, &metadata) == 0);
+    assert(ot_catalog_mark(&catalog, 1u, 1u) == 0 && ot_catalog_replace(&catalog, 1u, 1u) == 0);
+    list.paths[0] = "ROOT/B.BIN"; list.paths[1] = "ROOT/ABSENT.BIN"; list.count = 2u;
+    assert(ot_catalog_apply_selection(&catalog, &list) == OT_CATALOG_MISSING);
+    assert(ot_catalog_at(&catalog, 1u)->marked && ot_catalog_at(&catalog, 1u)->replace);
+    assert(!ot_catalog_at(&catalog, 2u)->marked && catalog.marked == 1u && catalog.replacements == 1u);
+    list.count = 1u; list.paths[0] = "ROOT";
+    assert(ot_catalog_apply_selection(&catalog, &list) == OT_CATALOG_ARGUMENT);
+    list.count = 2u; list.paths[0] = "ROOT/A.BIN"; list.paths[1] = "root/a.bin";
+    assert(ot_catalog_apply_selection(&catalog, &list) == OT_CATALOG_ARGUMENT);
+    list.count = 0u;
+    assert(ot_catalog_apply_selection(&catalog, &list) == OT_CATALOG_ARGUMENT);
+    list.count = 1u; list.paths[0] = "root/b.bin";
+    catalog.error = OT_CATALOG_LIMIT;
+    assert(ot_catalog_apply_selection(&catalog, &list) == OT_CATALOG_ARGUMENT && catalog.replacements == 1u);
+    catalog.error = 0;
+    assert(ot_catalog_apply_selection(&catalog, &list) == 0 && catalog.marked == 1u && catalog.replacements == 0u);
+    assert(!ot_catalog_at(&catalog, 1u)->marked && ot_catalog_at(&catalog, 2u)->marked);
+    assert(ot_catalog_replace(&catalog, 2u, 1u) == 0);
+    assert(ot_catalog_apply_selection(&catalog, &list) == 0 && catalog.replacements == 0u);
+    assert(ot_catalog_replace(&catalog, 2u, 1u) == 0);
+    strcpy(metadata.path, "root/b.bin");
+    assert(ot_catalog_capture(&catalog, 2ul, 1ul, &metadata) == 0);
+    list.count = 2u; list.paths[0] = "ROOT/A.BIN"; list.paths[1] = "ROOT/B.BIN";
+    assert(ot_catalog_apply_selection(&catalog, &list) == OT_CATALOG_AMBIGUOUS);
+    assert(catalog.marked == 1u && catalog.replacements == 1u && !ot_catalog_at(&catalog, 1u)->marked);
+    ot_catalog_free(&catalog);
+    /* A directory/file collision is ambiguous in either catalogue order. */
+    for (i = 0u; i < 2u; ++i) {
+        metadata.kind = i == 0u ? OT_FILE_DIRECTORY : OT_FILE_REGULAR;
+        strcpy(metadata.path, "SAME");
+        assert(ot_catalog_capture(&catalog, 1ul, 1ul, &metadata) == 0);
+        metadata.kind = i == 0u ? OT_FILE_REGULAR : OT_FILE_DIRECTORY;
+        strcpy(metadata.path, "same");
+        assert(ot_catalog_capture(&catalog, 2ul, 1ul, &metadata) == 0);
+        assert(ot_catalog_mark(&catalog, i == 0u ? 1u : 0u, 1u) == 0);
+        assert(ot_catalog_replace(&catalog, i == 0u ? 1u : 0u, 1u) == 0);
+        list.count = 1u; list.paths[0] = "SAME";
+        assert(ot_catalog_apply_selection(&catalog, &list) == OT_CATALOG_AMBIGUOUS);
+        assert(catalog.marked == 1u && catalog.replacements == 1u);
+        ot_catalog_free(&catalog);
+    }
+    metadata.kind = OT_FILE_REGULAR;
+    /* All 256 entries may be imported; input storage can change afterwards. */
+    memset(&list, 0, sizeof(list));
+    for (i = 0u; i < OT_CATALOG_MAX_ENTRIES; ++i) {
+        sprintf(selected[i], "F%03u.BIN", i);
+        strcpy(metadata.path, selected[i]);
+        assert(ot_catalog_capture(&catalog, 1ul, i + 1ul, &metadata) == 0);
+        list.paths[i] = selected[i];
+    }
+    list.count = OT_CATALOG_MAX_ENTRIES;
+    assert(ot_catalog_apply_selection(&catalog, &list) == 0 && catalog.marked == 256u);
+    memset(selected, 'X', sizeof(selected));
+    assert(strcmp(ot_catalog_at(&catalog, 255u)->metadata.path, "F255.BIN") == 0);
+    ot_catalog_free(&catalog);
+    puts("OpenTape atomic catalogue selection import tests passed");
 }
 
 static void catalog_tests(void)
@@ -352,6 +531,8 @@ int main(void)
     session_tests();
     catalog_tests();
     catalog_export_tests();
+    catalog_replacement_tests();
+    catalog_import_tests();
     puts("OpenTape streaming verification tests passed");
     return 0;
 }

@@ -73,6 +73,9 @@ static unsigned read_record(void *c, void *data, unsigned capacity, struct ot_ta
         if (bytes == 0xffff) {
             ++q->cursor; p->actual=0; p->result=5; p->diagnostic_class=2;
             p->target_status=2; p->sense_response=0x70; p->stream_flags=9;
+#ifdef OT_TAPE_STREAM_SETMARK
+            if(q->read_fault==9) { p->stream_flags=0x48; p->ascq=3; }
+#endif
             if (q->read_fault==1) p->stream_flags=10;
             if (q->read_fault==2) { p->stream_flags=0x28; p->sense_key=8; p->ascq=5; }
             return 0;
@@ -94,6 +97,12 @@ static unsigned read_record(void *c, void *data, unsigned capacity, struct ot_ta
             p->result=3; p->diagnostic_class=2; p->target_status=2; p->sense_response=0x70;
             p->sense_key=3; p->completion_flags=0x25;
         } else if (q->read_fault==4) { p->actual=0; p->stream_flags=8; }
+#ifdef OT_TAPE_STREAM_SETMARK
+        if(q->read_fault==9 && (p->stream_flags & OT_TAPE_STREAM_FILEMARK)) {
+            p->stream_flags=(p->stream_flags & ~OT_TAPE_STREAM_FILEMARK)|OT_TAPE_STREAM_SETMARK;
+            p->ascq=3;
+        }
+#endif
         return 0;
     }
     bytes=q->length[q->cursor++];
@@ -117,6 +126,12 @@ static unsigned read_record(void *c, void *data, unsigned capacity, struct ot_ta
             p->actual=0; p->stream_flags=8; /* ordinary empty record, not EOF */
         }
     }
+#ifdef OT_TAPE_STREAM_SETMARK
+    if(q->read_fault==9 && p->stream_flags & OT_TAPE_STREAM_FILEMARK) {
+        p->stream_flags=(p->stream_flags & ~OT_TAPE_STREAM_FILEMARK)|OT_TAPE_STREAM_SETMARK;
+        p->ascq=3;
+    }
+#endif
     return 0;
 }
 static void ops_init(struct ot_native_writer_ops *w, struct ot_native_reader_ops *r)
@@ -302,6 +317,23 @@ int main(void)
         assert(ot_reader_read(&result.reader,large_copy,sizeof(large_copy),&accepted)==OT_READ_FILEMARK && accepted==0);
         assert(ot_reader_close(&result.reader)==0 && f.closes==2);
     }
+#ifdef OT_TAPE_STREAM_SETMARK
+    for(mode=0;mode<2;++mode) for(i=0;i<2;++i) {
+        memset(&f,0,sizeof(f)); if(mode) { f.unit=512; f.workspace=512; }
+        assert(backup(&w)==0); f.read_fault=9; f.combined=i;
+        memset(&n,0,sizeof(n)); memset(&result,0,sizeof(result));
+        if(mode) {
+            assert(ot_native_reader_open_fixed(&n,&r,"tape",512)==0);
+            assert(ot_archive_native_reader_fixed(&result.reader,&n,workspace,sizeof(workspace))==0);
+        } else {
+            assert(ot_native_reader_open(&n,&r,"tape")==0);
+            assert(ot_archive_native_reader(&result.reader,&n)==0);
+        }
+        assert(ot_verify_session_opened(buffer,sizeof(buffer),0,0,&result)!=0);
+        assert(result.reader.failed && f.closes==2);
+        assert(result.reader.backend_result==OT_NATIVE_STREAM);
+    }
+#endif
     puts("Native archive variable/fixed framing and finalization integration tests passed");
     return 0;
 }
