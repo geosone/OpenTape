@@ -604,6 +604,10 @@ $(GDI)/build/INSTALL.EXE:
 clean:
 	rm -rf $(BUILD)
 
+.PHONY: dos-install-smoke
+dos-install-smoke:
+	bash tests/dos_install.sh
+
 .PHONY: dos-native-media-smoke
 dos-native-media-smoke:
 	MAXLANG=$(MAXLANG) OPENASPI=$(abspath $(OPENASPI)) bash tests/dos_native_media.sh

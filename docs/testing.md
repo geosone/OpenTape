@@ -1267,3 +1267,20 @@ fixed framing, tree payload and a late corrupt session boundary. The entire
 floppy image must remain unchanged and exact CDB totals must match the ordinary
 read sequences. Read pauses start at rewind 1 in these isolated fixtures;
 existing restore-progress fixtures retain their rewind-3 default.
+
+## DOS package installation
+
+```sh
+make dos-install-smoke
+```
+
+`tests/dos_install.sh` builds `make dist` for English and German, puts the
+package on a floppy and installs it silently with its GDI `INSTALL.EXE` into
+a fresh SvarDOS hard disk: `INSTALL /CHECK`, `INSTALL /B:C: /S`, the same
+installation again over itself, then `C:\OPENTAPE\INSTALL.EXE /U /B:C:`
+(confirmed with R and Enter through the QEMU monitor). The installed files
+must equal the package, `PathAppend=` must put `C:\OPENTAPE` into the PATH
+once, also after the second installation, and `/U` must take it out again,
+remove the files and the `GDI.INI` entry, keep the other AUTOEXEC.BAT lines
+and leave a consistent FAT. `/B:C:` matters: booted from a floppy, GDI takes
+A: as the system drive otherwise.

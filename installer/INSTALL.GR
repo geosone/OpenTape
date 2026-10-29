@@ -26,6 +26,4 @@ README.TXT
 LICENSE.TXT
 
 [Autoexec.bat]
-Remove=SET PATH=%PATH%;%DIR%
-Add=1|SET PATH=%PATH%;%DIR%
-Position=bottom
+PathAppend=1|%DIR%
