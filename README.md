@@ -122,5 +122,12 @@ limits; no new native platform backend is claimed implemented by this policy.
 
 ## License
 
-OpenTape is licensed under the GNU General Public License version 3.  See
-`LICENSE`.
+OpenTape is licensed under the GNU General Public License version 2 or (at
+your option) any later version.  See `LICENSE`.
+
+The package also carries parts under other licenses: `OPENTAPE.EXE` links
+Open386MAX's QUILIB (released by Qualitas under GPL v3) and is under
+version 3 as a whole, as is the installer
+([GDI](https://github.com/geosone/gdi)); their text is `GPL3.TXT`.
+`OTAPEWIN.EXE` is built with wxWindows 1.68E, whose permission notice is
+`WXWIN.LIC`.

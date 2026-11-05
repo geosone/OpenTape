@@ -14,5 +14,8 @@ GeosOne DOS Installer: https://github.com/geosone/gdi
 
 Dies ist eine fruehe Startversion und liest oder schreibt noch keine Baender.
 
-Lizenz: GNU General Public License Version 3.
+Lizenz: GNU General Public License Version 2 oder (nach Wahl) jede spaetere
+Version, siehe LICENSE.TXT.  OPENTAPE.EXE (es bindet Open386MAXs QUILIB
+ein) und der Installer (GDI) stehen als Ganzes unter Version 3, siehe
+GPL3.TXT.  OTAPEWIN.EXE nutzt wxWindows 1.68E, siehe WXWIN.LIC.
 Quellen: https://github.com/geosone/OpenTape

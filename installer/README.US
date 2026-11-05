@@ -14,5 +14,8 @@ Installer: https://github.com/geosone/gdi
 
 This is an early bootstrap build and does not read or write tapes yet.
 
-License: GNU General Public License version 3.
+License: GNU General Public License version 2 or (at your option) any later
+version, see LICENSE.TXT.  OPENTAPE.EXE (it links Open386MAX's QUILIB) and
+the installer (GDI) are under version 3 as a whole, see GPL3.TXT.
+OTAPEWIN.EXE uses wxWindows 1.68E, see WXWIN.LIC.
 Source:  https://github.com/geosone/OpenTape

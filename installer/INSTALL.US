@@ -1,8 +1,11 @@
-; OpenTape package for GeosOne DOS Installer (GDI), GPL version 3.
+; OpenTape package for GeosOne DOS Installer (GDI), GPL version 2 or later.
 [Setup]
 Title=OpenTape Setup
 Product=GeosOne OpenTape 0.1
-License=LICENSE.TXT
+License=1,2,3
+License1=OpenTape|LICENSE.TXT
+License2=Setup (GDI), OPENTAPE.EXE|GPL3.TXT
+License3=wxWindows (OTAPEWIN.EXE)|WXWIN.LIC
 Readme=README.TXT
 DefaultDir=%BOOT%\OPENTAPE
 Done=OpenTape is installed. Load an ASPITAPE-compatible driver before using it.
@@ -24,6 +27,8 @@ OPENTAPE.EXE
 2|OTAPEWIN.EXE
 README.TXT
 LICENSE.TXT
+GPL3.TXT
+WXWIN.LIC
 
 [Autoexec.bat]
 PathAppend=1|%DIR%

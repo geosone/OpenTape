@@ -525,7 +525,7 @@
 #define OT_MSG_MENU_HELP          "&Hilfe"
 #define OT_MSG_MENU_ABOUT         "&Info zu OpenTape..."
 #define OT_MSG_ABOUT_TITLE        "Info zu OpenTape"
-#define OT_MSG_ABOUT_TEXT         "OpenTape 0.1 Startversion\nGPL Version 3"
+#define OT_MSG_ABOUT_TEXT         "OpenTape 0.1 Startversion\nGPL Version 2 oder neuer"
 
 #define OT_MSG_BACKEND_AUTO       "automatisch"
 #define OT_MSG_BACKEND_LEGACY     "ASPITAPE-kompatibel"
@@ -1056,7 +1056,7 @@
 #define OT_MSG_MENU_HELP          "&Help"
 #define OT_MSG_MENU_ABOUT         "&About OpenTape..."
 #define OT_MSG_ABOUT_TITLE        "About OpenTape"
-#define OT_MSG_ABOUT_TEXT         "OpenTape 0.1 bootstrap\nGPL version 3"
+#define OT_MSG_ABOUT_TEXT         "OpenTape 0.1 bootstrap\nGPL version 2 or later"
 
 #define OT_MSG_BACKEND_AUTO       "automatic"
 #define OT_MSG_BACKEND_LEGACY     "ASPITAPE-compatible"
